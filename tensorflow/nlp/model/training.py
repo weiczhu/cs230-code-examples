@@ -69,7 +69,6 @@ def train_sess(sess, model_spec, num_steps, writer, params):
                               model_spec['labels'],
                               model_spec['sentence_lengths']])
 
-
                 # Write summaries for tensorboard
                 writer.add_summary(summ, global_step_val)
             else:
@@ -85,11 +84,19 @@ def train_sess(sess, model_spec, num_steps, writer, params):
 
             predictions = viterbi_prediction(logits_, sentence_lengths_, trans_params_)
 
+            accuracy_minibatch = []
             for lab, lab_pred, length in zip(labels_, predictions,
                                              sentence_lengths_):
                 lab = lab[:length]
                 lab_pred = lab_pred[:length]
+                accuracy_minibatch += [a == b for (a, b) in zip(lab, lab_pred)]
                 accuracy += [a == b for (a, b) in zip(lab, lab_pred)]
+
+            # Evaluate summaries for tensorboard only once in a while
+            if i % params.save_summary_steps == 0:
+                accuracy_minibatch = np.mean(accuracy_minibatch)
+                summ = tf.Summary(value=[tf.Summary.Value(tag='accuracy', simple_value=accuracy_minibatch)])
+                writer.add_summary(summ, global_step_val)
 
         accuracy = np.mean(accuracy)
 
