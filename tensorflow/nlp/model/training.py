@@ -3,11 +3,13 @@
 import logging
 import os
 
+import numpy as np
 from tqdm import trange
 import tensorflow as tf
 
 from model.utils import save_dict_to_json
 from model.evaluation import evaluate_sess
+from model.model_fn import viterbi_prediction
 
 
 def train_sess(sess, model_spec, num_steps, writer, params):
@@ -32,24 +34,72 @@ def train_sess(sess, model_spec, num_steps, writer, params):
     sess.run(model_spec['iterator_init_op'])
     sess.run(model_spec['metrics_init_op'])
 
-    # Use tqdm for progress bar
-    t = trange(num_steps)
-    for i in t:
-        # Evaluate summaries for tensorboard only once in a while
-        if i % params.save_summary_steps == 0:
-            # Perform a mini-batch update
-            _, _, loss_val, summ, global_step_val = sess.run([train_op, update_metrics, loss,
-                                                              summary_op, global_step])
-            # Write summaries for tensorboard
-            writer.add_summary(summ, global_step_val)
-        else:
-            _, _, loss_val = sess.run([train_op, update_metrics, loss])
-        # Log the loss in the tqdm progress bar
-        t.set_postfix(loss='{:05.3f}'.format(loss_val))
+    if params.model_version == 'lstm':
+        # Use tqdm for progress bar
+        t = trange(num_steps)
+        for i in t:
+            # Evaluate summaries for tensorboard only once in a while
+            if i % params.save_summary_steps == 0:
+                # Perform a mini-batch update
+                _, _, loss_val, summ, global_step_val = sess.run([train_op, update_metrics, loss,
+                                                                  summary_op, global_step])
+                # Write summaries for tensorboard
+                writer.add_summary(summ, global_step_val)
+            else:
+                _, _, loss_val = sess.run([train_op, update_metrics, loss])
+            # Log the loss in the tqdm progress bar
+            t.set_postfix(loss='{:05.3f}'.format(loss_val))
+
+        metrics_values = {k: v[0] for k, v in metrics.items()}
+        metrics_val = sess.run(metrics_values)
+
+    elif params.model_version == 'lstm-crf':
+        accuracy = []
+        # Use tqdm for progress bar
+        t = trange(num_steps)
+        for i in t:
+            # Evaluate summaries for tensorboard only once in a while
+            if i % params.save_summary_steps == 0:
+                # Perform a mini-batch update
+                _, _, loss_val, summ, global_step_val, logits_, trans_params_, labels_, sentence_lengths_ = \
+                    sess.run([train_op, update_metrics, loss,
+                              summary_op, global_step,
+                              model_spec['logits'],
+                              model_spec['trans_params'],
+                              model_spec['labels'],
+                              model_spec['sentence_lengths']])
 
 
-    metrics_values = {k: v[0] for k, v in metrics.items()}
-    metrics_val = sess.run(metrics_values)
+                # Write summaries for tensorboard
+                writer.add_summary(summ, global_step_val)
+            else:
+                _, _, loss_val, logits_, trans_params_, labels_, sentence_lengths_ = \
+                    sess.run([train_op, update_metrics, loss,
+                              model_spec['logits'],
+                              model_spec['trans_params'],
+                              model_spec['labels'],
+                              model_spec['sentence_lengths']])
+
+            # Log the loss in the tqdm progress bar
+            t.set_postfix(loss='{:05.3f}'.format(loss_val))
+
+            predictions = viterbi_prediction(logits_, sentence_lengths_, trans_params_)
+
+            for lab, lab_pred, length in zip(labels_, predictions,
+                                             sentence_lengths_):
+                lab = lab[:length]
+                lab_pred = lab_pred[:length]
+                accuracy += [a == b for (a, b) in zip(lab, lab_pred)]
+
+        accuracy = np.mean(accuracy)
+
+        metrics_values = {k: v[0] for k, v in metrics.items()}
+        metrics_val = sess.run(metrics_values)
+        metrics_val['accuracy'] = accuracy
+
+    else:
+        raise NotImplementedError("Unknown model version: {}".format(params.model_version))
+
     metrics_string = " ; ".join("{}: {:05.3f}".format(k, v) for k, v in metrics_val.items())
     logging.info("- Train metrics: " + metrics_string)
 
@@ -100,10 +150,11 @@ def train_and_evaluate(train_model_spec, eval_model_spec, model_dir, params, res
 
             # Evaluate for one epoch on validation set
             num_steps = (params.eval_size + params.batch_size - 1) // params.batch_size
-            metrics = evaluate_sess(sess, eval_model_spec, num_steps, eval_writer)
+            metrics = evaluate_sess(sess, eval_model_spec, num_steps, eval_writer, params)
+
+            eval_acc = metrics['accuracy']
 
             # If best_eval, best_save_path
-            eval_acc = metrics['accuracy']
             if eval_acc >= best_eval_acc:
                 # Store new best accuracy
                 best_eval_acc = eval_acc

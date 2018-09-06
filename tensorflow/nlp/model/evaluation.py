@@ -3,11 +3,12 @@
 import logging
 import os
 
+import numpy as np
 from tqdm import trange
 import tensorflow as tf
 
 from model.utils import save_dict_to_json
-
+from model.model_fn import viterbi_prediction
 
 def evaluate_sess(sess, model_spec, num_steps, writer=None, params=None):
     """Train the model on `num_steps` batches.
@@ -27,13 +28,41 @@ def evaluate_sess(sess, model_spec, num_steps, writer=None, params=None):
     sess.run(model_spec['iterator_init_op'])
     sess.run(model_spec['metrics_init_op'])
 
-    # compute metrics over the dataset
-    for _ in range(num_steps):
-        sess.run(update_metrics)
+    if params.model_version == 'lstm':
+        for _ in range(num_steps):
+            sess.run(update_metrics)
 
-    # Get the values of the metrics
-    metrics_values = {k: v[0] for k, v in eval_metrics.items()}
-    metrics_val = sess.run(metrics_values)
+        # Get the values of the metrics
+        metrics_values = {k: v[0] for k, v in eval_metrics.items()}
+        metrics_val = sess.run(metrics_values)
+
+    elif params.model_version == 'lstm-crf':
+        accuracy = []
+        # compute metrics over the dataset
+        for _ in range(num_steps):
+            # get tag scores and transition params of CRF
+            _, logits_, trans_params_, labels_, sentence_lengths_ = sess.run([update_metrics, model_spec['logits'],
+                                                                             model_spec['trans_params'], model_spec['labels'],
+                                                                             model_spec['sentence_lengths']])
+
+            predictions = viterbi_prediction(logits_, sentence_lengths_, trans_params_)
+
+            for lab, lab_pred, length in zip(labels_, predictions,
+                                             sentence_lengths_):
+                lab = lab[:length]
+                lab_pred = lab_pred[:length]
+                accuracy += [a == b for (a, b) in zip(lab, lab_pred)]
+
+        accuracy = np.mean(accuracy)
+
+        # Get the values of the metrics
+        metrics_values = {k: v[0] for k, v in eval_metrics.items()}
+        metrics_val = sess.run(metrics_values)
+        metrics_val['accuracy'] = accuracy
+
+    else:
+        raise NotImplementedError("Unknown model version: {}".format(params.model_version))
+
     metrics_string = " ; ".join("{}: {:05.3f}".format(k, v) for k, v in metrics_val.items())
     logging.info("- Eval metrics: " + metrics_string)
 

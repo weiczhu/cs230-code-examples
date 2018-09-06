@@ -61,6 +61,16 @@ def input_fn(mode, sentences, labels, params):
         .prefetch(1)  # make sure you always have one batch ready to serve
     )
 
+    """
+    padded_ds = ds.padded_batch(
+    BATCH_SIZE,
+    padded_shapes={
+        'label': [],                          # Scalar elements, no padding.
+        'sequence_feature': [None],           # Vector elements, padded to longest.
+        'seq_of_seqs_feature': [None, None],  # Matrix elements, padded to longest
+    })                                        # in each dimension.
+    """
+
     # Create initializable iterator from this dataset so that we can reset at each epoch
     iterator = dataset.make_initializable_iterator()
 
