@@ -41,14 +41,14 @@ def evaluate_sess(sess, model_spec, num_steps, writer=None, params=None):
         # compute metrics over the dataset
         for _ in range(num_steps):
             # get tag scores and transition params of CRF
-            _, logits_, trans_params_, labels_, sentence_lengths_ = sess.run([update_metrics, model_spec['logits'],
-                                                                             model_spec['trans_params'], model_spec['labels'],
-                                                                             model_spec['sentence_lengths']])
+            _, logits, trans_params, labels, sentence_lengths = sess.run([update_metrics, model_spec['logits'],
+                                                                         model_spec['trans_params'], model_spec['labels'],
+                                                                         model_spec['sentence_lengths']])
 
-            predictions = viterbi_prediction(logits_, sentence_lengths_, trans_params_)
+            predictions = viterbi_prediction(logits, sentence_lengths, trans_params)
 
-            for lab, lab_pred, length in zip(labels_, predictions,
-                                             sentence_lengths_):
+            for lab, lab_pred, length in zip(labels, predictions,
+                                             sentence_lengths):
                 lab = lab[:length]
                 lab_pred = lab_pred[:length]
                 accuracy += [a == b for (a, b) in zip(lab, lab_pred)]
@@ -72,6 +72,8 @@ def evaluate_sess(sess, model_spec, num_steps, writer=None, params=None):
         for tag, val in metrics_val.items():
             summ = tf.Summary(value=[tf.Summary.Value(tag=tag, simple_value=val)])
             writer.add_summary(summ, global_step_val)
+
+    metrics_val['trans_params'] = trans_params
 
     return metrics_val
 
@@ -101,7 +103,7 @@ def evaluate(model_spec, model_dir, params, restore_from):
 
         # Evaluate
         num_steps = (params.eval_size + params.batch_size - 1) // params.batch_size
-        metrics = evaluate_sess(sess, model_spec, num_steps)
+        metrics = evaluate_sess(sess, model_spec, num_steps, params=params)
         metrics_name = '_'.join(restore_from.split('/'))
         save_path = os.path.join(model_dir, "metrics_test_{}.json".format(metrics_name))
         save_dict_to_json(metrics, save_path)

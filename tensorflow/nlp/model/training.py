@@ -61,7 +61,7 @@ def train_sess(sess, model_spec, num_steps, writer, params):
             # Evaluate summaries for tensorboard only once in a while
             if i % params.save_summary_steps == 0:
                 # Perform a mini-batch update
-                _, _, loss_val, summ, global_step_val, logits_, trans_params_, labels_, sentence_lengths_ = \
+                _, _, loss_val, summ, global_step_val, logits, trans_params, labels, sentence_lengths = \
                     sess.run([train_op, update_metrics, loss,
                               summary_op, global_step,
                               model_spec['logits'],
@@ -72,7 +72,7 @@ def train_sess(sess, model_spec, num_steps, writer, params):
                 # Write summaries for tensorboard
                 writer.add_summary(summ, global_step_val)
             else:
-                _, _, loss_val, logits_, trans_params_, labels_, sentence_lengths_ = \
+                _, _, loss_val, logits, trans_params, labels, sentence_lengths = \
                     sess.run([train_op, update_metrics, loss,
                               model_spec['logits'],
                               model_spec['trans_params'],
@@ -82,11 +82,11 @@ def train_sess(sess, model_spec, num_steps, writer, params):
             # Log the loss in the tqdm progress bar
             t.set_postfix(loss='{:05.3f}'.format(loss_val))
 
-            predictions = viterbi_prediction(logits_, sentence_lengths_, trans_params_)
+            predictions = viterbi_prediction(logits, sentence_lengths, trans_params)
 
             accuracy_minibatch = []
-            for lab, lab_pred, length in zip(labels_, predictions,
-                                             sentence_lengths_):
+            for lab, lab_pred, length in zip(labels, predictions,
+                                             sentence_lengths):
                 lab = lab[:length]
                 lab_pred = lab_pred[:length]
                 accuracy_minibatch += [a == b for (a, b) in zip(lab, lab_pred)]
@@ -172,6 +172,11 @@ def train_and_evaluate(train_model_spec, eval_model_spec, model_dir, params, res
                 # Save best eval metrics in a json file in the model directory
                 best_json_path = os.path.join(model_dir, "metrics_eval_best_weights.json")
                 save_dict_to_json(metrics, best_json_path)
+
+                if params.model_version == 'lstm-crf':
+                    trans_params = metrics['trans_params']
+                    best_trans_params_path = os.path.join(model_dir, "metrics_eval_best_trans_params.npy")
+                    np.save(best_trans_params_path, trans_params)
 
             # Save latest eval metrics in a json file in the model directory
             last_json_path = os.path.join(model_dir, "metrics_eval_last_weights.json")

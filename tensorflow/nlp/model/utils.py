@@ -73,5 +73,5 @@ def save_dict_to_json(d, json_path):
     """
     with open(json_path, 'w') as f:
         # We need to convert the values to float for json (it doesn't accept np.array, np.float, )
-        d = {k: float(v) for k, v in d.items()}
+        d = {k: str(v) for k, v in d.items()}
         json.dump(d, f, indent=4)
