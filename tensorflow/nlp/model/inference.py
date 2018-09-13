@@ -28,7 +28,7 @@ def inference_sess(sess, model_spec, params=None):
         predictions, sentence_lengths = sess.run([model_spec['predictions'],
                             model_spec['sentence_lengths']])
 
-        tags_idx2str = model_spec['tags_idx2str']
+        idx2tags = model_spec['idx2tags']
         metrics_val = dict()
         pred_sentences = []
         for i, prediction in enumerate(predictions):
@@ -36,7 +36,7 @@ def inference_sess(sess, model_spec, params=None):
             pred_sentence = []
             for j, word_id in enumerate(prediction):
                 if j < sentence_length:
-                    pred_sentence.append(tags_idx2str.lookup(tf.constant(word_id, dtype='int64')))
+                    pred_sentence.append(idx2tags.lookup(tf.constant(word_id, dtype='int64')))
             pred_sentences.append(pred_sentence)
 
         pred_sentences = sess.run(pred_sentences)
@@ -51,7 +51,7 @@ def inference_sess(sess, model_spec, params=None):
 
         predictions = viterbi_prediction(logits, sentence_lengths, trans_params)
 
-        tags_idx2str = model_spec['tags_idx2str']
+        idx2tags = model_spec['idx2tags']
         metrics_val = dict()
         pred_sentences = []
         for i, prediction in enumerate(predictions):
@@ -59,7 +59,7 @@ def inference_sess(sess, model_spec, params=None):
             pred_sentence = []
             for j, word_id in enumerate(prediction):
                 if j < sentence_length:
-                    pred_sentence.append(tags_idx2str.lookup(tf.constant(word_id, dtype='int64')))
+                    pred_sentence.append(idx2tags.lookup(tf.constant(word_id, dtype='int64')))
             pred_sentences.append(pred_sentence)
 
         pred_sentences = sess.run(pred_sentences)

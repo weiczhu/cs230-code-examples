@@ -22,7 +22,62 @@ parser.add_argument('--data_dir', default='data/small', help="Directory containi
 parser.add_argument('--restore_from', default='best_weights',
                     help="Subdirectory of model dir or file containing the weights")
 
+
+def preprocess(sentences):
+    sentences = [x.lower() for x in sentences]
+
+    return sentences
+
+
+def postprocess(sentences, predictions):
+
+    print('model inference results:')
+    annotated_sents = []
+    for (sentence, prediction) in zip(sentences, predictions):
+        sentence = sentence.split(' ')
+        prediction = prediction.split(' ')
+        annotated_sent = []
+        for (s, p) in zip(sentence, prediction):
+            annotated_sent.append(s + '/' + p)
+        annotated_sent = ' '.join(annotated_sent)
+
+        annotated_sents.append(annotated_sent)
+        print(annotated_sent)
+
+    return annotated_sents
+
+
+def pos_tag(sentences):
+
+    sentences = preprocess(sentences)
+    dataset = load_dataset_from_slices(sentences, words2idx)
+
+    # Specify other parameters for the dataset and the model
+    params.batch_size = len(sentences)
+
+    # Create iterator over the test set
+    inputs = input_fn('infer', dataset, None, params)
+    inputs['idx2tags'] = idx2tags
+
+    if trans_params is not None:
+        inputs['trans_params'] = trans_params
+
+    # Define the model
+    logging.info("Creating the model...")
+    model_spec = model_fn('infer', inputs, params, reuse=False)
+    logging.info("- done.")
+
+    logging.info("Starting inference")
+    metrics = infer(model_spec, args.model_dir, params, args.restore_from)
+    predictions = metrics['predictions']
+
+    annotated_sents = postprocess(sentences, predictions)
+
+    return annotated_sents
+
+
 if __name__ == '__main__':
+    global args, params, words2idx, tags2idx, idx2words, idx2tags, trans_params
     # Set the random seed for the whole graph
     tf.set_random_seed(230)
 
@@ -48,11 +103,18 @@ if __name__ == '__main__':
     path_eval_labels = os.path.join(args.data_dir, 'test/labels.txt')
 
     # Load Vocabularies
-    words = tf.contrib.lookup.index_table_from_file(path_words, num_oov_buckets=num_oov_buckets)
-    tags = tf.contrib.lookup.index_table_from_file(path_tags)
+    words2idx = tf.contrib.lookup.index_table_from_file(path_words, num_oov_buckets=num_oov_buckets)
+    tags2idx = tf.contrib.lookup.index_table_from_file(path_tags)
 
-    words_idx2str = tf.contrib.lookup.index_to_string_table_from_file(path_words)
-    tags_idx2str = tf.contrib.lookup.index_to_string_table_from_file(path_tags)
+    idx2words = tf.contrib.lookup.index_to_string_table_from_file(path_words)
+    idx2tags = tf.contrib.lookup.index_to_string_table_from_file(path_tags)
+
+    params.id_pad_word = words2idx.lookup(tf.constant(params.pad_word))
+    params.id_pad_tag = tags2idx.lookup(tf.constant(params.pad_tag))
+
+    if params.model_version == 'lstm-crf':
+        best_trans_params_path = os.path.join(args.model_dir, "metrics_eval_best_trans_params.npy")
+        trans_params = np.load(best_trans_params_path)
 
     # Create the input data pipeline
     logging.info("Creating the dataset...")
@@ -65,45 +127,6 @@ if __name__ == '__main__':
                  'kasuya setagaya-ku tokyo 158-0085 is my address',
                  'deliver it to kasuya setagaya-ku tokyo 158-0085']
 
-    sentences = [x.lower() for x in sentences]
+    annotated_sents = pos_tag(sentences)
 
-    infer_sentences = load_dataset_from_slices(sentences, words)
 
-    # Specify other parameters for the dataset and the model
-    params.batch_size = len(sentences)
-    params.id_pad_word = words.lookup(tf.constant(params.pad_word))
-    params.id_pad_tag = tags.lookup(tf.constant(params.pad_tag))
-
-    # Create iterator over the test set
-    inputs = input_fn('infer', infer_sentences, None, params)
-    inputs['tags_idx2str'] = tags_idx2str
-
-    if params.model_version == 'lstm-crf':
-        best_trans_params_path = os.path.join(args.model_dir, "metrics_eval_best_trans_params.npy")
-        trans_params = np.load(best_trans_params_path)
-        inputs['trans_params'] = trans_params
-
-    logging.info("- done.")
-
-    # Define the model
-    logging.info("Creating the model...")
-    model_spec = model_fn('infer', inputs, params, reuse=False)
-    logging.info("- done.")
-
-    logging.info("Starting inference")
-    metrics = infer(model_spec, args.model_dir, params, args.restore_from)
-    predictions = metrics['predictions']
-
-    print('---------------------------------------')
-    print('model inference results:')
-    annotated_sents = []
-    for (sentence, prediction) in zip(sentences, predictions):
-        sentence = sentence.split(' ')
-        prediction = prediction.split(' ')
-        annotated_sent = []
-        for (s, p) in zip(sentence, prediction):
-            annotated_sent.append(s + '/' + p)
-        annotated_sent = ' '.join(annotated_sent)
-
-        annotated_sents.append(annotated_sent)
-        print(annotated_sent)
