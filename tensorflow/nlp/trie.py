@@ -5,6 +5,7 @@ import os
 parser = argparse.ArgumentParser()
 parser.add_argument('--data_dir', default='data/small', help="Directory containing the dataset")
 
+
 class Node:
     def __init__(self, label=None, data=None):
         self.label = label
@@ -136,6 +137,7 @@ class Trie:
         types = self.dictionary[current_node.data]
         return (current_node.data, types)
 
+
 def pos_tag(sentence):
     segments = sentence.split(' ')
 
@@ -152,6 +154,7 @@ def pos_tag(sentence):
 
     return annotate_sents
 
+
 def pred_suggest(sentence):
     to_sugguest = sentence.split(' ')[-1]
 
@@ -162,6 +165,7 @@ def pred_suggest(sentence):
     suggest_words = trie.start_with_prefix('')
 
     return suggest_words
+
 
 if __name__ == '__main__':
     global trie

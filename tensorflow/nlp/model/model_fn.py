@@ -22,6 +22,8 @@ def model_fn(features, labels, mode, params):
     sentences = features['sentences']
     sentence_lengths = features['sentence_lengths']
 
+    sentence_lengths = tf.cast(sentence_lengths, tf.int32)
+
     # Get word embeddings for each token in the sentence
     embeddings = tf.get_variable(name="embeddings", dtype=tf.float32,
                                  shape=[params.vocab_size, params.embedding_size])
@@ -47,10 +49,12 @@ def model_fn(features, labels, mode, params):
         # then use the predicted class-number that is output by
         # the neural network. Optimization etc. is not needed.
 
+        logits, _ = tf.contrib.crf.crf_decode(logits, trans_params, sentence_lengths)
+
         feed_dict = {
             'logits': logits,
             'sentence_lengths': sentence_lengths,
-            'trans_params': trans_params
+            # 'trans_params': trans_params
         }
 
         spec = tf.estimator.EstimatorSpec(mode=mode,
@@ -61,12 +65,16 @@ def model_fn(features, labels, mode, params):
                                           prediction_hooks=[PredictHook(feed_dict, params)]
                                           )
     else:
+
+        # trans_params_update_o = tf.assign(trans_params, transition_params)
         # Define loss and accuracy (we need to apply a mask to account for padding)
         log_likelihood, transition_params = tf.contrib.crf.crf_log_likelihood(
             logits, labels, sentence_lengths)
         loss = tf.reduce_mean(-log_likelihood)
 
-        trans_params_update_o = tf.assign(trans_params, transition_params)
+        tf.assign(trans_params, transition_params)
+
+        logits, _ = tf.contrib.crf.crf_decode(logits, trans_params, sentence_lengths)
 
         # Define training step that minimizes the loss with the Adam optimizer
         optimizer = tf.train.AdamOptimizer(params.learning_rate)
@@ -91,8 +99,8 @@ def model_fn(features, labels, mode, params):
                     'logits': logits,
                     'labels': labels,
                     'sentence_lengths': sentence_lengths,
-                    'trans_params_update_o': trans_params_update_o,
-                    'trans_params': trans_params,
+                    # 'trans_params_update_o': trans_params_update_o,
+                    # 'trans_params': trans_params,
                     'global_step': global_step
         }
         # Wrap all of this in an EstimatorSpec.
@@ -111,6 +119,7 @@ def model_fn(features, labels, mode, params):
 def viterbi_prediction(logits, sentence_lengths, trans_params):
 
     viterbi_sequences = []
+    viterbi_scores = []
 
     # iterate over the sentences because no batching in vitervi_decode
     for logit, sequence_length in zip(logits, sentence_lengths):
@@ -118,15 +127,17 @@ def viterbi_prediction(logits, sentence_lengths, trans_params):
         viterbi_seq, viterbi_score = tf.contrib.crf.viterbi_decode(
             logit, trans_params)
         viterbi_sequences += [viterbi_seq]
+        viterbi_scores += [viterbi_score]
 
-    predictions = viterbi_sequences
+    predictions = viterbi_sequences, viterbi_scores
 
     return predictions
 
 
 def compute_accuracy(logits, sentence_lengths, trans_params, labels):
     accuracy = list()
-    predictions = viterbi_prediction(logits, sentence_lengths, trans_params)
+    # predictions, _ = viterbi_prediction(logits, sentence_lengths, trans_params)
+    predictions = logits
 
     for lab, lab_pred, length in zip(labels, predictions, sentence_lengths):
         lab = lab[:length]
@@ -159,10 +170,11 @@ class PredictHook(tf.train.SessionRunHook):
 
         logits = self.feed_dict_value['logits']
         sentence_lengths = self.feed_dict_value['sentence_lengths']
-        trans_params = self.feed_dict_value['trans_params']
+        # trans_params = self.feed_dict_value['trans_params']
         # print('trans_params:', trans_params)
 
-        predictions = viterbi_prediction(logits, sentence_lengths, trans_params)
+        # predictions, _ = viterbi_prediction(logits, sentence_lengths, trans_params)
+        predictions = logits
         self.predictions_hist.append(predictions)
 
 
@@ -200,8 +212,8 @@ class TrainEvalHook(tf.train.SessionRunHook):
                                                                              np.mean(accuracy_hist)))
 
         # print('saved trans_params:', self.feed_dict_value['trans_params'])
-        if self.mode == tf.estimator.ModeKeys.TRAIN:
-            np.save(self.params.trans_params_path, self.feed_dict_value['trans_params'])
+        # if self.mode == tf.estimator.ModeKeys.TRAIN:
+        #     np.save(self.params.trans_params_path, self.feed_dict_value['trans_params'])
 
     def before_run(self, run_context):
         return tf.train.SessionRunArgs({'feed_dict': self.feed_dict})
@@ -211,13 +223,13 @@ class TrainEvalHook(tf.train.SessionRunHook):
 
         loss = self.feed_dict_value['loss']
         logits = self.feed_dict_value['logits']
-        trans_params = self.feed_dict_value['trans_params']
+        # trans_params = self.feed_dict_value['trans_params']
         labels = self.feed_dict_value['labels']
         sentence_lengths = self.feed_dict_value['sentence_lengths']
         global_step = self.feed_dict_value['global_step']
 
         self.loss_hist.append(loss)
-        self.accuracy_hist.append(compute_accuracy(logits, sentence_lengths, trans_params, labels))
+        self.accuracy_hist.append(compute_accuracy(logits, sentence_lengths, None, labels))
 
         if self.mode == tf.estimator.ModeKeys.TRAIN and global_step % self.params.num_steps == 0:
             self.epoch_end()

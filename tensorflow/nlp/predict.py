@@ -57,6 +57,13 @@ sentences_texts = ['Miyasaka is a good place',
                  'kasuya setagaya-ku tokyo 158-0085 is my address',
                  'deliver it to kasuya setagaya-ku tokyo 158-0085']
 
+# sentences_texts = [
+# "Argentina benefits from rich natural resources , a highly literate population , an export-oriented agricultural sector , and a diversified industrial base .",
+# "Although one of the world 's wealthiest countries 100 years ago , Argentina suffered during most of the 20th century from recurring economic crises , persistent fiscal and current account deficits , high inflation , mounting external debt , and capital flight .",
+# "A severe depression , growing public and external indebtedness , and a bank run culminated in 2001 in the most serious economic , social , and political crisis in the country 's turbulent history .",
+# "Interim President Adolfo RODRIGUEZ SAA declared a default - the largest in history - on the government 's foreign debt in December of that year , and abruptly resigned only a few days after taking office ."
+# ]
+
 
 def predict_input_fn():
 
