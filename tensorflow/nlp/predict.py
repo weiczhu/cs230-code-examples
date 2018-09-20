@@ -15,9 +15,9 @@ from model.process_fn import postprocess_output
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--model_dir', default='experiments/base_model',
+parser.add_argument('--model_dir', default='experiments/crf_model',
                     help="Directory containing params.json")
-parser.add_argument('--data_dir', default='data/small', help="Directory containing the dataset")
+parser.add_argument('--data_dir', default='data/custom', help="Directory containing the dataset")
 parser.add_argument('--restore_dir', default=None,
                     help="Optional, directory containing weights to reload before training")
 
@@ -48,55 +48,74 @@ params.buffer_size = params.train_size # buffer size for shuffling
 params.path_words = os.path.join(args.data_dir, 'words.txt')
 params.path_tags = os.path.join(args.data_dir, 'tags.txt')
 
-sentences_texts = ['Miyasaka is a good place',
-                 'I am working at tsurumaki',
-                 'I want to go to tamagwa setagaya tokyo',
-                 'I live at tamagawa denenchofu setagaya',
-                 'I favor Gotokuji setagaya-ku for our trip',
-                 'shall we go to tamagawa denenchofu setagaya-ku tokyo 158-0085 for lunch ?',
-                 'kasuya setagaya-ku tokyo 158-0085 is my address',
-                 'deliver it to kasuya setagaya-ku tokyo 158-0085']
-
-# sentences_texts = [
-# "Argentina benefits from rich natural resources , a highly literate population , an export-oriented agricultural sector , and a diversified industrial base .",
-# "Although one of the world 's wealthiest countries 100 years ago , Argentina suffered during most of the 20th century from recurring economic crises , persistent fiscal and current account deficits , high inflation , mounting external debt , and capital flight .",
-# "A severe depression , growing public and external indebtedness , and a bank run culminated in 2001 in the most serious economic , social , and political crisis in the country 's turbulent history .",
-# "Interim President Adolfo RODRIGUEZ SAA declared a default - the largest in history - on the government 's foreign debt in December of that year , and abruptly resigned only a few days after taking office ."
-# ]
+logging.info("Start training model")
+trans_params_path = os.path.join(args.model_dir, "trans_params.npy")
+params.trans_params_path = trans_params_path
+checkpoint_path = os.path.join(args.model_dir, 'checkpoint')
+params.checkpoint_path = checkpoint_path
 
 
-def predict_input_fn():
+# Expose params to outer scope
+def get_predict_params():
+    global params
+    return params
 
-    sentences, sentence_lengths = preprocess_input(sentences_texts, params)
 
-    predict_input_fn = tf.estimator.inputs.numpy_input_fn(
-        x={'sentences': np.array(sentences), 'sentence_lengths': np.array(sentence_lengths)},
-        batch_size=1,
-        num_epochs=1,
-        shuffle=False)
+# Predictor class for prediction serving
+class Predictor:
 
-    return predict_input_fn()
+    # Static variable for estimator
+    estimator = None
+
+    def __init__(self, params):
+        self.params = params
+
+        # Using lazy instantiation for estimator
+        if Predictor.estimator is None:
+            Predictor.estimator = tf.estimator.Estimator(model_fn=model_fn,
+                                               params=self.params,
+                                               model_dir=self.params.checkpoint_path)
+
+        self.sentences_texts = None
+        self.sentences, self.sentence_lengths = None, None
+
+    def predict_input_fn(self):
+
+        predict_input_fn = tf.estimator.inputs.numpy_input_fn(
+            x={'sentences': np.array(self.sentences), 'sentence_lengths': np.array(self.sentence_lengths)},
+            batch_size=1,
+            num_epochs=1,
+            shuffle=False)
+
+        return predict_input_fn()
+
+    def predict(self, sentences_texts):
+
+        self.sentences_texts = sentences_texts
+        self.sentences, self.sentence_lengths = preprocess_input(self.sentences_texts, self.params)
+
+        predictions = Predictor.estimator.predict(input_fn=self.predict_input_fn)
+
+        recognized_entities_list = postprocess_output(predictions, sentences_texts, params)
+
+        return recognized_entities_list
 
 
 if __name__ == '__main__':
 
-    logging.info("Start training model")
+    predictor = Predictor(params)
 
-    trans_params_path = os.path.join(args.model_dir, "trans_params.npy")
-    params.trans_params_path = trans_params_path
-    chkpt_path = os.path.join(args.model_dir, 'checkpoint')
+    sentences_texts = ['I want to go to tamagwa setagaya tokyo',
+                       'I live at tamagawa denenchofu setagaya',
+                       'I favor Gotokuji setagaya-ku for our trip',
+                       'shall we go to tamagawa denenchofu setagaya-ku tokyo 158-0085 for lunch ?',
+                       'kasuya setagaya-ku tokyo 158-0085 is my address',
+                       'deliver it to kasuya setagaya-ku tokyo 158-0085']
 
-    estimator = tf.estimator.Estimator(model_fn=model_fn,
-                                       params=params,
-                                       model_dir=chkpt_path)
+    print(predictor.predict(sentences_texts))
 
-    predictions = estimator.predict(input_fn=predict_input_fn)
+    sentences_texts = ['Miyasaka is a good place',
+                       'I am working at tsurumaki']
 
-    sentences, sentence_lengths = preprocess_input(sentences_texts, params)
+    print(predictor.predict(sentences_texts))
 
-    trans_params_value = np.load(params.trans_params_path)
-    print('trans_params_value:', trans_params_value)
-
-    recognized_entities_list = postprocess_output(predictions, sentences_texts, params)
-
-    print(recognized_entities_list)

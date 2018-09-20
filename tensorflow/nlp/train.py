@@ -90,7 +90,7 @@ if __name__ == '__main__':
     num_steps = params.train_size // params.batch_size
     params.num_steps = num_steps
 
-    chkpt_path = os.path.join(args.model_dir, 'checkpoint')
+    checkpoint_path = os.path.join(args.model_dir, 'checkpoint')
     expt_path = 'exporter'
 
     run_config = tf.estimator.RunConfig(save_summary_steps=params.num_steps,
@@ -101,7 +101,7 @@ if __name__ == '__main__':
     estimator = tf.estimator.Estimator(model_fn=model_fn,
                                        config=run_config,
                                        params=params,
-                                       model_dir=chkpt_path)
+                                       model_dir=checkpoint_path)
 
     train_spec = tf.estimator.TrainSpec(
         input_fn=train_input_fn,
