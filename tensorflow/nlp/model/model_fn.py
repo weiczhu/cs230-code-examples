@@ -49,20 +49,14 @@ def model_fn(features, labels, mode, params):
         # then use the predicted class-number that is output by
         # the neural network. Optimization etc. is not needed.
 
-        logits, _ = tf.contrib.crf.crf_decode(logits, trans_params, sentence_lengths)
-
-        feed_dict = {
-            'logits': logits,
-            'sentence_lengths': sentence_lengths,
-            # 'trans_params': trans_params
-        }
+        predictions, _ = tf.contrib.crf.crf_decode(logits, trans_params, sentence_lengths)
 
         spec = tf.estimator.EstimatorSpec(mode=mode,
-                                          predictions=logits,
+                                          predictions=predictions,
                                           export_outputs={
-                                              'predictions': tf.estimator.export.PredictOutput(logits)
+                                              'predictions': tf.estimator.export.PredictOutput(predictions)
                                           },
-                                          prediction_hooks=[PredictHook(feed_dict, params)]
+                                          prediction_hooks=[]
                                           )
     else:
 
@@ -72,9 +66,10 @@ def model_fn(features, labels, mode, params):
             logits, labels, sentence_lengths)
         loss = tf.reduce_mean(-log_likelihood)
 
-        tf.assign(trans_params, transition_params)
+        if mode == tf.estimator.ModeKeys.TRAIN:
+            tf.assign(trans_params, transition_params)
 
-        logits, _ = tf.contrib.crf.crf_decode(logits, trans_params, sentence_lengths)
+        predictions, _ = tf.contrib.crf.crf_decode(logits, trans_params, sentence_lengths)
 
         # Define training step that minimizes the loss with the Adam optimizer
         optimizer = tf.train.AdamOptimizer(params.learning_rate)
@@ -84,23 +79,26 @@ def model_fn(features, labels, mode, params):
         # -----------------------------------------------------------
         # METRICS AND SUMMARIES
         # Metrics for evaluation using tf.metrics (average over whole dataset)
+
+        mask = tf.sequence_mask(sentence_lengths)
+        # apply mask
+        labels_masked = tf.boolean_mask(labels, mask)
+        predictions_masked = tf.boolean_mask(predictions, mask)
+
         with tf.variable_scope("metrics"):
             if mode == tf.estimator.ModeKeys.TRAIN:
                 metrics = {
-                    'loss': tf.metrics.mean(loss)
+                    'loss': tf.metrics.mean(loss),
+                    'accuracy': tf.metrics.accuracy(labels_masked, predictions_masked)
                 }
             elif mode == tf.estimator.ModeKeys.EVAL:
                 metrics = {
-                    'eval_loss': tf.metrics.mean(loss)
+                    'eval_loss': tf.metrics.mean(loss),
+                    'eval_accuracy': tf.metrics.accuracy(labels_masked, predictions_masked)
                 }
 
         feed_dict = {
-                    'loss': loss,
-                    'logits': logits,
-                    'labels': labels,
-                    'sentence_lengths': sentence_lengths,
-                    # 'trans_params_update_o': trans_params_update_o,
-                    # 'trans_params': trans_params,
+                    'metrics': metrics,
                     'global_step': global_step
         }
         # Wrap all of this in an EstimatorSpec.
@@ -131,13 +129,11 @@ def viterbi_prediction(logits, sentence_lengths, trans_params):
 
     predictions = viterbi_sequences, viterbi_scores
 
-    return predictions
+    return predictions, viterbi_scores
 
 
-def compute_accuracy(logits, sentence_lengths, trans_params, labels):
+def compute_accuracy(predictions, sentence_lengths, labels):
     accuracy = list()
-    # predictions, _ = viterbi_prediction(logits, sentence_lengths, trans_params)
-    predictions = logits
 
     for lab, lab_pred, length in zip(labels, predictions, sentence_lengths):
         lab = lab[:length]
@@ -145,37 +141,6 @@ def compute_accuracy(logits, sentence_lengths, trans_params, labels):
         accuracy += [a == b for (a, b) in zip(lab, lab_pred)]
 
     return np.mean(accuracy)
-
-
-class PredictHook(tf.train.SessionRunHook):
-
-    def __init__(self, feed_dict, params):
-        self.predictions_hist = list()
-
-        self.feed_dict = feed_dict
-        self.params = params
-
-    def begin(self):
-        pass
-
-    def end(self, session):
-        # print('predictions:', self.predictions_hist)
-        pass
-
-    def before_run(self, run_context):
-        return tf.train.SessionRunArgs({'feed_dict': self.feed_dict})
-
-    def after_run(self, run_context, run_values):
-        self.feed_dict_value = run_values.results['feed_dict']
-
-        logits = self.feed_dict_value['logits']
-        sentence_lengths = self.feed_dict_value['sentence_lengths']
-        # trans_params = self.feed_dict_value['trans_params']
-        # print('trans_params:', trans_params)
-
-        # predictions, _ = viterbi_prediction(logits, sentence_lengths, trans_params)
-        predictions = logits
-        self.predictions_hist.append(predictions)
 
 
 class TrainEvalHook(tf.train.SessionRunHook):
@@ -195,42 +160,34 @@ class TrainEvalHook(tf.train.SessionRunHook):
 
     def end(self, session):
         if self.mode == tf.estimator.ModeKeys.EVAL:
-            self.epoch_end()
+            global_step = self.feed_dict_value['global_step']
+            epochs = global_step // self.params.num_steps
 
-    def epoch_end(self):
-        mode_str = 'Training   ' if self.mode == tf.estimator.ModeKeys.TRAIN else 'Evaluation'
-        global_step = self.feed_dict_value['global_step']
-        epochs = global_step // self.params.num_steps
-
-        loss_hist = self.loss_hist[-self.params.num_steps:] if self.mode == tf.estimator.ModeKeys.TRAIN \
-                                                            else self.loss_hist
-        accuracy_hist = self.accuracy_hist[-self.params.num_steps:] if self.mode == tf.estimator.ModeKeys.TRAIN \
-            else self.accuracy_hist
-
-        print('Epochs\t{}: {}\t\tlosses:{:05.3f};\taccuracy:{:05.3f}'.format(epochs, mode_str,
-                                                                             np.mean(loss_hist),
-                                                                             np.mean(accuracy_hist)))
-
-        # print('saved trans_params:', self.feed_dict_value['trans_params'])
-        # if self.mode == tf.estimator.ModeKeys.TRAIN:
-        #     np.save(self.params.trans_params_path, self.feed_dict_value['trans_params'])
+            print('Epochs {:3}:\t{}\tlosses:{:05.3f};\taccuracy:{:05.3f}'.format(epochs, self.mode,
+                                                                                 np.mean(self.loss_hist),
+                                                                                 np.mean(self.accuracy_hist)))
 
     def before_run(self, run_context):
         return tf.train.SessionRunArgs({'feed_dict': self.feed_dict})
 
     def after_run(self, run_context, run_values):
         self.feed_dict_value = run_values.results['feed_dict']
-
-        loss = self.feed_dict_value['loss']
-        logits = self.feed_dict_value['logits']
-        # trans_params = self.feed_dict_value['trans_params']
-        labels = self.feed_dict_value['labels']
-        sentence_lengths = self.feed_dict_value['sentence_lengths']
+        metrics = self.feed_dict_value['metrics']
         global_step = self.feed_dict_value['global_step']
 
-        self.loss_hist.append(loss)
-        self.accuracy_hist.append(compute_accuracy(logits, sentence_lengths, None, labels))
+        epochs = global_step // self.params.num_steps
+        steps = global_step % self.params.num_steps
 
-        if self.mode == tf.estimator.ModeKeys.TRAIN and global_step % self.params.num_steps == 0:
-            self.epoch_end()
+        # print('metrics:', metrics)
+        if self.mode == tf.estimator.ModeKeys.TRAIN:
+            self.loss_hist.append(metrics['loss'][1])
+            self.accuracy_hist.append(metrics['accuracy'][1])
+        else:
+            self.loss_hist.append(metrics['eval_loss'][1])
+            self.accuracy_hist.append(metrics['eval_accuracy'][1])
+
+        if self.mode == tf.estimator.ModeKeys.TRAIN:
+            print('Epochs {:3}\tsteps {:3}:\t{}\tlosses:{:05.3f};\taccuracy:{:05.3f}'.format(epochs, steps, self.mode,
+                                                                             self.loss_hist[-1],
+                                                                             self.accuracy_hist[-1]))
 

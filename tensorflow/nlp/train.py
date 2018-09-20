@@ -4,15 +4,12 @@ import argparse
 import logging
 import os
 
-import numpy as np
 import tensorflow as tf
 
 from model.utils import Params
 from model.utils import set_logger
 from model.input_fn import input_fn
 from model.model_fn import model_fn
-from model.process_fn import preprocess_input
-from model.process_fn import decode_logits
 
 
 parser = argparse.ArgumentParser()

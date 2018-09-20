@@ -11,7 +11,7 @@ from model.utils import Params
 from model.utils import set_logger
 from model.model_fn import model_fn
 from model.process_fn import preprocess_input
-from model.process_fn import decode_logits
+from model.process_fn import postprocess_output
 
 
 parser = argparse.ArgumentParser()
@@ -90,14 +90,13 @@ if __name__ == '__main__':
                                        params=params,
                                        model_dir=chkpt_path)
 
-    logits = estimator.predict(input_fn=predict_input_fn)
+    predictions = estimator.predict(input_fn=predict_input_fn)
 
     sentences, sentence_lengths = preprocess_input(sentences_texts, params)
 
     trans_params_value = np.load(params.trans_params_path)
     print('trans_params_value:', trans_params_value)
 
-    recognized_entities_list = decode_logits(logits, sentences_texts, sentence_lengths,
-                                             trans_params_value, params.idx2tag)
+    recognized_entities_list = postprocess_output(predictions, sentences_texts, params.idx2tag)
 
     print(recognized_entities_list)

@@ -48,11 +48,7 @@ def preprocess_input(sentences, params):
     return sentences, sentence_lengths
 
 
-def decode_logits(logits, sentences_texts, sentence_lengths, trans_params_value, idx2tag):
-
-    # predictions, scores = viterbi_prediction(list(logits), sentence_lengths, trans_params_value)
-    # print('viterbi scores:', scores)
-    predictions = logits
+def postprocess_output(predictions, sentences_texts, idx2tag):
 
     predictions = [list(map(lambda x: idx2tag.get(x), prediction)) for prediction in
                    predictions]
