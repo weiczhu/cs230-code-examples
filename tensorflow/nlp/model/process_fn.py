@@ -1,7 +1,5 @@
 """Tensorflow utility functions for evaluation"""
 
-from model.model_fn import viterbi_prediction
-
 
 def preprocess_input(sentences, params):
 
@@ -48,9 +46,9 @@ def preprocess_input(sentences, params):
     return sentences, sentence_lengths
 
 
-def postprocess_output(predictions, sentences_texts, idx2tag):
+def postprocess_output(predictions, sentences_texts, params):
 
-    predictions = [list(map(lambda x: idx2tag.get(x), prediction)) for prediction in
+    predictions = [list(map(lambda x: params.idx2tag.get(x), prediction)) for prediction in
                    predictions]
     print('predictions:', predictions)
 

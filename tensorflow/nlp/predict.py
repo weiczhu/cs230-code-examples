@@ -97,6 +97,6 @@ if __name__ == '__main__':
     trans_params_value = np.load(params.trans_params_path)
     print('trans_params_value:', trans_params_value)
 
-    recognized_entities_list = postprocess_output(predictions, sentences_texts, params.idx2tag)
+    recognized_entities_list = postprocess_output(predictions, sentences_texts, params)
 
     print(recognized_entities_list)

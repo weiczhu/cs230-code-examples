@@ -2,6 +2,7 @@
 
 import numpy as np
 import tensorflow as tf
+from tqdm import trange
 
 
 def model_fn(features, labels, mode, params):
@@ -154,6 +155,7 @@ class TrainEvalHook(tf.train.SessionRunHook):
         self.params = params
 
         self.feed_dict_value = None
+        self.t = None
 
     def begin(self):
         pass
@@ -175,7 +177,7 @@ class TrainEvalHook(tf.train.SessionRunHook):
         metrics = self.feed_dict_value['metrics']
         global_step = self.feed_dict_value['global_step']
 
-        epochs = global_step // self.params.num_steps
+        epochs = (global_step + self.params.num_steps - 1) // self.params.num_steps
         steps = global_step % self.params.num_steps
 
         # print('metrics:', metrics)
@@ -187,6 +189,13 @@ class TrainEvalHook(tf.train.SessionRunHook):
             self.accuracy_hist.append(metrics['eval_accuracy'][1])
 
         if self.mode == tf.estimator.ModeKeys.TRAIN:
+            # if steps == 1:
+            #     self.t = trange(self.params.num_steps)
+            #     self.t.set_postfix(loss='{:05.3f}'.format(self.loss_hist[-1]),
+            #                        accuarcy='{:05.3f}'.format(self.accuracy_hist[-1]))
+            # else:
+            #     self.t.n = steps - 1
+
             print('Epochs {:3}\tsteps {:3}:\t{}\tlosses:{:05.3f};\taccuracy:{:05.3f}'.format(epochs, steps, self.mode,
                                                                              self.loss_hist[-1],
                                                                              self.accuracy_hist[-1]))
