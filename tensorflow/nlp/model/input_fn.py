@@ -3,7 +3,7 @@
 import tensorflow as tf
 
 
-def load_dataset_from_text(path_txt, vocab):
+def load_sentences_from_text(path_txt, vocab):
     """Create tf.data Instance from txt file
 
     Args:
@@ -20,32 +20,34 @@ def load_dataset_from_text(path_txt, vocab):
     dataset = dataset.map(lambda string: tf.string_split([string]).values)
 
     # Lookup tokens to return their ids
-    dataset = dataset.map(lambda tokens: (vocab.lookup(tokens), tf.size(tokens)))
+    dataset = dataset.map(lambda tokens: {'sentences': vocab.lookup(tokens), 'sentence_lengths': tf.size(tokens)})
 
     return dataset
 
-def load_dataset_from_slices(slices, vocab):
+
+def load_labels_from_text(path_txt, vocab):
     """Create tf.data Instance from txt file
 
     Args:
-        slices: (list of string) texts containing one example per item
+        path_txt: (string) path containing one example per line
         vocab: (tf.lookuptable)
 
     Returns:
         dataset: (tf.Dataset) yielding list of ids of tokens for each example
     """
     # Load txt file, one example per line
-    dataset = tf.data.Dataset.from_tensor_slices(slices)
+    dataset = tf.data.TextLineDataset(path_txt)
 
     # Convert line into list of tokens, splitting by white space
     dataset = dataset.map(lambda string: tf.string_split([string]).values)
 
     # Lookup tokens to return their ids
-    dataset = dataset.map(lambda tokens: (vocab.lookup(tokens), tf.size(tokens)))
+    dataset = dataset.map(lambda tokens: vocab.lookup(tokens))
 
     return dataset
 
-def input_fn(mode, sentences, labels, params):
+
+def input_fn(mode, path_sentences, path_labels, params):
     """Input function for NER
 
     Args:
@@ -56,89 +58,42 @@ def input_fn(mode, sentences, labels, params):
         params: (Params) contains hyperparameters of the model (ex: `params.num_epochs`)
 
     """
+    # Load Vocabularies
+    words = tf.contrib.lookup.index_table_from_file(params.path_words, num_oov_buckets=params.num_oov_buckets)
+    tags = tf.contrib.lookup.index_table_from_file(params.path_tags)
+    tf.add_to_collection(tf.GraphKeys.TABLE_INITIALIZERS, tf.tables_initializer(name='init_all_tables'))
 
-    is_inference = mode == 'infer'
-    if is_inference:
-        dataset = sentences
+    # Load all the dataset in memory for shuffling is training
+    is_training = (mode == 'train')
+    repeat_num = params.num_epochs if is_training else 1
+    batch_size = params.batch_size if is_training else params.eval_size
+    buffer_size = params.buffer_size if is_training else 1
 
-        # Create batches and pad the sentences of different length
-        padded_shapes = ((tf.TensorShape([None]),  # sentence of unknown size
-                          tf.TensorShape([])))  # size(words)
+    # Create the input data pipeline
+    sentences = load_sentences_from_text(path_sentences, words)
 
-        padding_values = ((params.id_pad_word,  # sentence padded on the right with id_pad_word
-                           0))  # size(words) -- unused
+    labels = load_labels_from_text(path_labels, tags)
 
-        dataset = (dataset
-                   .padded_batch(params.batch_size, padded_shapes=padded_shapes, padding_values=padding_values)
-                   .prefetch(1)  # make sure you always have one batch ready to serve
-                   )
+    # Zip the sentence and the labels together
+    dataset = tf.data.Dataset.zip((sentences, labels))
 
-        # Create initializable iterator from this dataset so that we can reset at each epoch
-        iterator = dataset.make_initializable_iterator()
+    id_pad_word = words.lookup(tf.constant(params.pad_word))
+    id_pad_tag = tags.lookup(tf.constant(params.pad_tag))
 
-        # Query the output of the iterator for input to the model
-        (sentence, sentence_lengths) = iterator.get_next()
-        init_op = iterator.initializer
+    # Create batches and pad the sentences of different length
+    padded_shapes = ({'sentences': tf.TensorShape([None]),
+                      'sentence_lengths': tf.TensorShape([])},
+                     tf.TensorShape([None]))
 
-        # Build and return a dictionnary containing the nodes / ops
-        inputs = {
-            'sentence': sentence,
-            'sentence_lengths': sentence_lengths,
-            'iterator_init_op': init_op
-        }
+    padding_values = ({'sentences': id_pad_word,
+                       'sentence_lengths': 0},
+                      id_pad_tag)
 
-        return inputs
+    dataset = (dataset
+               .repeat(repeat_num)
+               .shuffle(buffer_size=buffer_size)
+               .padded_batch(batch_size, padded_shapes=padded_shapes, padding_values=padding_values)
+               .prefetch(1)
+               )
 
-    else:
-
-        # Load all the dataset in memory for shuffling is training
-        is_training = (mode == 'train')
-        buffer_size = params.buffer_size if is_training else 1
-
-        # Zip the sentence and the labels together
-        dataset = tf.data.Dataset.zip((sentences, labels))
-
-        # Create batches and pad the sentences of different length
-        padded_shapes = ((tf.TensorShape([None]),  # sentence of unknown size
-                          tf.TensorShape([])),     # size(words)
-                         (tf.TensorShape([None]),  # labels of unknown size
-                          tf.TensorShape([])))     # size(tags)
-
-        padding_values = ((params.id_pad_word,   # sentence padded on the right with id_pad_word
-                           0),                   # size(words) -- unused
-                          (params.id_pad_tag,    # labels padded on the right with id_pad_tag
-                           0))                   # size(tags) -- unused
-
-
-        dataset = (dataset
-            .shuffle(buffer_size=buffer_size)
-            .padded_batch(params.batch_size, padded_shapes=padded_shapes, padding_values=padding_values)
-            .prefetch(1)  # make sure you always have one batch ready to serve
-        )
-
-        """
-        padded_ds = ds.padded_batch(
-        BATCH_SIZE,
-        padded_shapes={
-            'label': [],                          # Scalar elements, no padding.
-            'sequence_feature': [None],           # Vector elements, padded to longest.
-            'seq_of_seqs_feature': [None, None],  # Matrix elements, padded to longest
-        })                                        # in each dimension.
-        """
-
-        # Create initializable iterator from this dataset so that we can reset at each epoch
-        iterator = dataset.make_initializable_iterator()
-
-        # Query the output of the iterator for input to the model
-        ((sentence, sentence_lengths), (labels, _)) = iterator.get_next()
-        init_op = iterator.initializer
-
-        # Build and return a dictionnary containing the nodes / ops
-        inputs = {
-            'sentence': sentence,
-            'labels': labels,
-            'sentence_lengths': sentence_lengths,
-            'iterator_init_op': init_op
-        }
-
-        return inputs
+    return dataset

@@ -1,9 +1,10 @@
 """Define the model."""
 
+import numpy as np
 import tensorflow as tf
 
 
-def build_model(mode, inputs, params):
+def model_fn(features, labels, mode, params):
     """Compute logits of the model (output distribution)
 
     Args:
@@ -15,254 +16,102 @@ def build_model(mode, inputs, params):
     Returns:
         output: (tf.Tensor) output of the model
     """
-    sentence = inputs['sentence']
-    sentence_lengths = inputs['sentence_lengths']
+    trans_params = tf.get_variable(name="trans_params", dtype=tf.float32,
+                                   shape=[params.number_of_tags, params.number_of_tags])
 
-    if params.model_version == 'lstm':
-        # Get word embeddings for each token in the sentence
-        embeddings = tf.get_variable(name="embeddings", dtype=tf.float32,
-                shape=[params.vocab_size, params.embedding_size])
-        sentence = tf.nn.embedding_lookup(embeddings, sentence)
+    sentences = features['sentences']
+    sentence_lengths = features['sentence_lengths']
 
-        # Apply LSTM over the embeddings
-        lstm_cell = tf.nn.rnn_cell.BasicLSTMCell(params.lstm_num_units)
-        output, _  = tf.nn.dynamic_rnn(lstm_cell, sentence, dtype=tf.float32)
+    # Get word embeddings for each token in the sentence
+    embeddings = tf.get_variable(name="embeddings", dtype=tf.float32,
+                                 shape=[params.vocab_size, params.embedding_size])
+    embedding_lookup = tf.nn.embedding_lookup(embeddings, sentences)
 
-        print('output shape:', output.shape)
+    # Apply LSTM over the embeddings
+    cell_fw = tf.contrib.rnn.LSTMCell(params.lstm_num_units)
+    cell_bw = tf.contrib.rnn.LSTMCell(params.lstm_num_units)
 
-        # Compute logits from the output of the LSTM
-        logits = tf.layers.dense(output, params.number_of_tags)
-        print('logits shape:', logits.shape)
+    (output_fw, output_bw), _ = tf.nn.bidirectional_dynamic_rnn(cell_fw,
+                                                                cell_bw, embedding_lookup,
+                                                                sequence_length=sentence_lengths,
+                                                                time_major=False,
+                                                                dtype=tf.float32)
 
-    elif params.model_version == 'lstm-crf':
-        # Get word embeddings for each token in the sentence
-        embeddings = tf.get_variable(name="embeddings", dtype=tf.float32,
-                shape=[params.vocab_size, params.embedding_size])
-        sentence = tf.nn.embedding_lookup(embeddings, sentence)
+    output = tf.concat([output_fw, output_bw], axis=-1)
 
-        # Apply LSTM over the embeddings
-        cell_fw = tf.contrib.rnn.LSTMCell(params.lstm_num_units)
-        cell_bw = tf.contrib.rnn.LSTMCell(params.lstm_num_units)
+    # Compute logits from the output of the LSTM
+    logits = tf.layers.dense(output, params.number_of_tags)
 
-        (output_fw, output_bw), _ = tf.nn.bidirectional_dynamic_rnn(cell_fw,
-                                                                    cell_bw, sentence,
-                                                                    sequence_length=sentence_lengths,
-                                                                    time_major=False,
-                                                                    dtype=tf.float32)
+    if mode == tf.estimator.ModeKeys.PREDICT:
+        # If the estimator is supposed to be in prediction-mode
+        # then use the predicted class-number that is output by
+        # the neural network. Optimization etc. is not needed.
 
-        output = tf.concat([output_fw, output_bw], axis=-1)
-        print('output shape:', output.shape)
+        feed_dict = {
+            'logits': logits,
+            'sentence_lengths': sentence_lengths,
+            'trans_params': trans_params
+        }
 
-        # Compute logits from the output of the LSTM
-        logits = tf.layers.dense(output, params.number_of_tags)
-        print('logits shape:', logits.shape)
-
+        spec = tf.estimator.EstimatorSpec(mode=mode,
+                                          predictions=logits,
+                                          export_outputs={
+                                              'predictions': tf.estimator.export.PredictOutput(logits)
+                                          },
+                                          prediction_hooks=[PredictHook(feed_dict, params)]
+                                          )
     else:
-        raise NotImplementedError("Unknown model version: {}".format(params.model_version))
+        # Define loss and accuracy (we need to apply a mask to account for padding)
+        log_likelihood, transition_params = tf.contrib.crf.crf_log_likelihood(
+            logits, labels, sentence_lengths)
+        loss = tf.reduce_mean(-log_likelihood)
 
-    return logits
+        trans_params_update_o = tf.assign(trans_params, transition_params)
 
+        # Define training step that minimizes the loss with the Adam optimizer
+        optimizer = tf.train.AdamOptimizer(params.learning_rate)
+        global_step = tf.train.get_or_create_global_step()
+        train_op = optimizer.minimize(loss, global_step=global_step)
 
-def model_fn(mode, inputs, params, reuse=False):
-    """Model function defining the graph operations.
-
-    Args:
-        mode: (string) 'train', 'eval', etc.
-        inputs: (dict) contains the inputs of the graph (features, labels...)
-                this can be `tf.placeholder` or outputs of `tf.data`
-        params: (Params) contains hyperparameters of the model (ex: `params.learning_rate`)
-        reuse: (bool) whether to reuse the weights
-
-    Returns:
-        model_spec: (dict) contains the graph operations or nodes needed for training / evaluation
-    """
-    is_inference = (mode == 'infer')
-    is_training = (mode == 'train')
-
-    if is_inference:
-        if params.model_version == 'lstm':
-            # -----------------------------------------------------------
-            # MODEL: define the layers of the model
-            with tf.variable_scope('model', reuse=reuse):
-                # Compute the output distribution of the model and the predictions
-                logits = build_model(mode, inputs, params)
-                predictions = tf.argmax(logits, -1)
-
-                # -----------------------------------------------------------
-                # MODEL SPECIFICATION
-                # Create the model specification and return it
-                # It contains nodes or operations in the graph that will be used for training and evaluation
-                model_spec = inputs
-                variable_init_op = tf.group(*[tf.global_variables_initializer(), tf.tables_initializer()])
-                model_spec['variable_init_op'] = variable_init_op
-                model_spec['logits'] = logits
-                model_spec['predictions'] = predictions
-
-        elif params.model_version == 'lstm-crf':
-            # -----------------------------------------------------------
-            # MODEL: define the layers of the model
-            with tf.variable_scope('model', reuse=reuse):
-                # Compute the output distribution of the model and the predictions
-                logits = build_model(mode, inputs, params)
-
-                # -----------------------------------------------------------
-                # MODEL SPECIFICATION
-                # Create the model specification and return it
-                # It contains nodes or operations in the graph that will be used for training and evaluation
-                model_spec = inputs
-                variable_init_op = tf.group(*[tf.global_variables_initializer(), tf.tables_initializer()])
-                model_spec['variable_init_op'] = variable_init_op
-                model_spec['logits'] = logits
-
-        else:
-            raise NotImplementedError("Unknown model version: {}".format(params.model_version))
-
-        return model_spec
-
-    else:
-
-        labels = inputs['labels']
-        sentence_lengths = inputs['sentence_lengths']
-
-        if params.model_version == 'lstm':
-            # -----------------------------------------------------------
-            # MODEL: define the layers of the model
-            with tf.variable_scope('model', reuse=reuse):
-                # Compute the output distribution of the model and the predictions
-                logits = build_model(mode, inputs, params)
-                predictions = tf.argmax(logits, -1)
-
-            # Define loss and accuracy (we need to apply a mask to account for padding)
-            losses = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=labels)
-            mask = tf.sequence_mask(sentence_lengths)
-            losses = tf.boolean_mask(losses, mask)
-            loss = tf.reduce_mean(losses)
-            accuracy = tf.reduce_mean(tf.cast(tf.equal(labels, predictions), tf.float32))
-
-            # Define training step that minimizes the loss with the Adam optimizer
-            if is_training:
-                optimizer = tf.train.AdamOptimizer(params.learning_rate)
-                global_step = tf.train.get_or_create_global_step()
-                train_op = optimizer.minimize(loss, global_step=global_step)
-
-            # -----------------------------------------------------------
-            # METRICS AND SUMMARIES
-            # Metrics for evaluation using tf.metrics (average over whole dataset)
-            with tf.variable_scope("metrics"):
+        # -----------------------------------------------------------
+        # METRICS AND SUMMARIES
+        # Metrics for evaluation using tf.metrics (average over whole dataset)
+        with tf.variable_scope("metrics"):
+            if mode == tf.estimator.ModeKeys.TRAIN:
                 metrics = {
-                    'accuracy': tf.metrics.accuracy(labels=labels, predictions=predictions),
-                    'loss': tf.metrics.mean(loss),
-                    # 'true_positives': tf.metrics.true_positives(labels, predictions),
-                    # 'false_positives': tf.metrics.false_positives(labels, predictions),
-                    # 'true_negatives': tf.metrics.true_negatives(labels, predictions),
-                    # 'false_negatives': tf.metrics.false_negatives(labels, predictions),
-                    # 'precision': tf.metrics.precision(labels, predictions),
-                    # 'recall': tf.metrics.recall(labels, predictions),
-                    # 'auc': tf.metrics.auc(labels, predictions)
+                    'loss': tf.metrics.mean(loss)
+                }
+            elif mode == tf.estimator.ModeKeys.EVAL:
+                metrics = {
+                    'eval_loss': tf.metrics.mean(loss)
                 }
 
-            # Group the update ops for the tf.metrics
-            update_metrics_op = tf.group(*[op for _, op in metrics.values()])
+        feed_dict = {
+                    'loss': loss,
+                    'logits': logits,
+                    'labels': labels,
+                    'sentence_lengths': sentence_lengths,
+                    'trans_params_update_o': trans_params_update_o,
+                    'trans_params': trans_params,
+                    'global_step': global_step
+        }
+        # Wrap all of this in an EstimatorSpec.
+        spec = tf.estimator.EstimatorSpec(
+            mode=mode,
+            loss=loss,
+            train_op=train_op,
+            eval_metric_ops=metrics,
+            training_hooks=[TrainEvalHook(mode, feed_dict, params)],
+            evaluation_hooks=[TrainEvalHook(mode, feed_dict, params)]
+            )
 
-            # Get the op to reset the local variables used in tf.metrics
-            metric_variables = tf.get_collection(tf.GraphKeys.LOCAL_VARIABLES, scope="metrics")
-            metrics_init_op = tf.variables_initializer(metric_variables)
-
-            # Summaries for training
-            tf.summary.scalar('loss', loss)
-            tf.summary.scalar('accuracy', accuracy)
-
-            # -----------------------------------------------------------
-            # MODEL SPECIFICATION
-            # Create the model specification and return it
-            # It contains nodes or operations in the graph that will be used for training and evaluation
-            model_spec = inputs
-            variable_init_op = tf.group(*[tf.global_variables_initializer(), tf.tables_initializer()])
-            model_spec['variable_init_op'] = variable_init_op
-            model_spec["predictions"] = predictions
-            model_spec['loss'] = loss
-            model_spec['accuracy'] = accuracy
-            model_spec['metrics_init_op'] = metrics_init_op
-            model_spec['metrics'] = metrics
-            model_spec['update_metrics'] = update_metrics_op
-            model_spec['summary_op'] = tf.summary.merge_all()
-
-            if is_training:
-                model_spec['train_op'] = train_op
-
-        elif params.model_version == 'lstm-crf':
-            # -----------------------------------------------------------
-            # MODEL: define the layers of the model
-            with tf.variable_scope('model', reuse=reuse):
-                # Compute the output distribution of the model and the predictions
-                logits = build_model(mode, inputs, params)
-
-                # Define loss and accuracy (we need to apply a mask to account for padding)
-                log_likelihood, transition_params = tf.contrib.crf.crf_log_likelihood(
-                    logits, labels, sentence_lengths)
-                loss = tf.reduce_mean(-log_likelihood)
-
-            # Define training step that minimizes the loss with the Adam optimizer
-            if is_training:
-                optimizer = tf.train.AdamOptimizer(params.learning_rate)
-                global_step = tf.train.get_or_create_global_step()
-                train_op = optimizer.minimize(loss, global_step=global_step)
-
-            # -----------------------------------------------------------
-            # METRICS AND SUMMARIES
-            # Metrics for evaluation using tf.metrics (average over whole dataset)
-            with tf.variable_scope("metrics"):
-                metrics = {
-                    # 'accuracy': tf.metrics.accuracy(labels=labels, predictions=predictions),
-                    'loss': tf.metrics.mean(loss),
-                    # 'true_positives': tf.metrics.true_positives(labels, predictions),
-                    # 'false_positives': tf.metrics.false_positives(labels, predictions),
-                    # 'true_negatives': tf.metrics.true_negatives(labels, predictions),
-                    # 'false_negatives': tf.metrics.false_negatives(labels, predictions),
-                    # 'precision': tf.metrics.precision(labels, predictions),
-                    # 'recall': tf.metrics.recall(labels, predictions),
-                    # 'auc': tf.metrics.auc(labels, predictions)
-                }
-
-            # Group the update ops for the tf.metrics
-            update_metrics_op = tf.group(*[op for _, op in metrics.values()])
-
-            # Get the op to reset the local variables used in tf.metrics
-            metric_variables = tf.get_collection(tf.GraphKeys.LOCAL_VARIABLES, scope="metrics")
-            metrics_init_op = tf.variables_initializer(metric_variables)
-
-            # Summaries for training
-            tf.summary.scalar('loss', loss)
-            # tf.summary.scalar('accuracy', accuracy)
-
-            # -----------------------------------------------------------
-            # MODEL SPECIFICATION
-            # Create the model specification and return it
-            # It contains nodes or operations in the graph that will be used for training and evaluation
-            model_spec = inputs
-            variable_init_op = tf.group(*[tf.global_variables_initializer(), tf.tables_initializer()])
-            model_spec['variable_init_op'] = variable_init_op
-            model_spec['logits'] = logits
-            model_spec['trans_params'] = transition_params
-            # model_spec["predictions"] = predictions
-            model_spec['loss'] = loss
-            # model_spec['accuracy'] = accuracy
-            model_spec['metrics_init_op'] = metrics_init_op
-            model_spec['metrics'] = metrics
-            model_spec['update_metrics'] = update_metrics_op
-            model_spec['summary_op'] = tf.summary.merge_all()
-
-            if is_training:
-                model_spec['train_op'] = train_op
-
-        else:
-            raise NotImplementedError("Unknown model version: {}".format(params.model_version))
-
-        return model_spec
+    return spec
 
 
 def viterbi_prediction(logits, sentence_lengths, trans_params):
+
     viterbi_sequences = []
+
     # iterate over the sentences because no batching in vitervi_decode
     for logit, sequence_length in zip(logits, sentence_lengths):
         logit = logit[:sequence_length]  # keep only the valid steps
@@ -273,3 +122,103 @@ def viterbi_prediction(logits, sentence_lengths, trans_params):
     predictions = viterbi_sequences
 
     return predictions
+
+
+def compute_accuracy(logits, sentence_lengths, trans_params, labels):
+    accuracy = list()
+    predictions = viterbi_prediction(logits, sentence_lengths, trans_params)
+
+    for lab, lab_pred, length in zip(labels, predictions, sentence_lengths):
+        lab = lab[:length]
+        lab_pred = lab_pred[:length]
+        accuracy += [a == b for (a, b) in zip(lab, lab_pred)]
+
+    return np.mean(accuracy)
+
+
+class PredictHook(tf.train.SessionRunHook):
+
+    def __init__(self, feed_dict, params):
+        self.predictions_hist = list()
+
+        self.feed_dict = feed_dict
+        self.params = params
+
+    def begin(self):
+        pass
+
+    def end(self, session):
+        # print('predictions:', self.predictions_hist)
+        pass
+
+    def before_run(self, run_context):
+        return tf.train.SessionRunArgs({'feed_dict': self.feed_dict})
+
+    def after_run(self, run_context, run_values):
+        self.feed_dict_value = run_values.results['feed_dict']
+
+        logits = self.feed_dict_value['logits']
+        sentence_lengths = self.feed_dict_value['sentence_lengths']
+        trans_params = self.feed_dict_value['trans_params']
+        # print('trans_params:', trans_params)
+
+        predictions = viterbi_prediction(logits, sentence_lengths, trans_params)
+        self.predictions_hist.append(predictions)
+
+
+class TrainEvalHook(tf.train.SessionRunHook):
+
+    def __init__(self, mode, feed_dict, params):
+        self.loss_hist = list()
+        self.accuracy_hist = list()
+
+        self.mode = mode
+        self.feed_dict = feed_dict
+        self.params = params
+
+        self.feed_dict_value = None
+
+    def begin(self):
+        pass
+
+    def end(self, session):
+        if self.mode == tf.estimator.ModeKeys.EVAL:
+            self.epoch_end()
+
+    def epoch_end(self):
+        mode_str = 'Training   ' if self.mode == tf.estimator.ModeKeys.TRAIN else 'Evaluation'
+        global_step = self.feed_dict_value['global_step']
+        epochs = global_step // self.params.num_steps
+
+        loss_hist = self.loss_hist[-self.params.num_steps:] if self.mode == tf.estimator.ModeKeys.TRAIN \
+                                                            else self.loss_hist
+        accuracy_hist = self.accuracy_hist[-self.params.num_steps:] if self.mode == tf.estimator.ModeKeys.TRAIN \
+            else self.accuracy_hist
+
+        print('Epochs\t{}: {}\t\tlosses:{:05.3f};\taccuracy:{:05.3f}'.format(epochs, mode_str,
+                                                                             np.mean(loss_hist),
+                                                                             np.mean(accuracy_hist)))
+
+        # print('saved trans_params:', self.feed_dict_value['trans_params'])
+        if self.mode == tf.estimator.ModeKeys.TRAIN:
+            np.save(self.params.trans_params_path, self.feed_dict_value['trans_params'])
+
+    def before_run(self, run_context):
+        return tf.train.SessionRunArgs({'feed_dict': self.feed_dict})
+
+    def after_run(self, run_context, run_values):
+        self.feed_dict_value = run_values.results['feed_dict']
+
+        loss = self.feed_dict_value['loss']
+        logits = self.feed_dict_value['logits']
+        trans_params = self.feed_dict_value['trans_params']
+        labels = self.feed_dict_value['labels']
+        sentence_lengths = self.feed_dict_value['sentence_lengths']
+        global_step = self.feed_dict_value['global_step']
+
+        self.loss_hist.append(loss)
+        self.accuracy_hist.append(compute_accuracy(logits, sentence_lengths, trans_params, labels))
+
+        if self.mode == tf.estimator.ModeKeys.TRAIN and global_step % self.params.num_steps == 0:
+            self.epoch_end()
+
