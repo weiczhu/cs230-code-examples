@@ -3,7 +3,7 @@ import os
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--data_dir', default='data/small', help="Directory containing the dataset")
+parser.add_argument('--data_dir', default='data/custom', help="Directory containing the dataset")
 
 
 class Node:
@@ -23,9 +23,15 @@ class Node:
 
 
 class Trie:
-    def __init__(self):
+
+    def __init__(self, dictionary_path):
         self.head = Node()
         self.dictionary = dict()
+
+        with open(dictionary_path) as f:
+            for line in f:
+                word, type = line.strip().split('::')
+                self.add(word, type)
 
     def __getitem__(self, key):
         return self.head.children[key]
@@ -124,7 +130,7 @@ class Trie:
 
         return words
 
-    def get_data(self, word):
+    def find_node_data(self, word):
         """ This returns the 'data' of the node identified by the given word """
         if not self.has_word(word):
             raise ValueError('{} not found in trie'.format(word))
@@ -135,60 +141,59 @@ class Trie:
             current_node = current_node[letter]
 
         types = self.dictionary[current_node.data]
-        return (current_node.data, types)
+
+        return [current_node.data, types]
+
+    def pos_tag(self, sentence):
+        words = sentence.split(' ')
+
+        results = []
+        for i in range(len(words)):
+            for j in range(i, len(words)):
+                n_grams = ' '.join(words[i:j + 1])
+                try:
+                    print(self.find_node_data(n_grams))
+                    results.append(self.find_node_data(n_grams))
+                except ValueError as e:
+                    # print("An exception was raised, skipping a word: {}".format(e))
+                    pass
+
+        return results
+
+    def pred_suggest(self, sentence):
+        words = sentence.split(' ')
+        # print('total words:', words)
+
+        for i in range(-len(words), 0):
+            prev_words = words[:i]
+            ngram = ' '.join(words[i:])
+
+            suggestions = self.start_with_prefix(ngram)
+
+            if suggestions:
+                suggestions = [' '.join(prev_words) + ' ' + suggestion for suggestion in suggestions]
+                return suggestions
 
 
-def pos_tag(sentence):
-    segments = sentence.split(' ')
-
-    annotate_sents = []
-    for i in range(len(segments)):
-        for j in range(i, len(segments)):
-            words_str = ' '.join(segments[i:j + 1])
-            try:
-                print(trie.get_data(words_str))
-                annotate_sents.append(trie.get_data(words_str))
-            except ValueError as e:
-                # print("An exception was raised, skipping a word: {}".format(e))
-                pass
-
-    return annotate_sents
+# Load the dictionary from the dataset into params
+args = parser.parse_args()
+dictionary_path = os.path.join(args.data_dir, 'dictionary.txt')
+assert os.path.isfile(dictionary_path), "No words file found at {}, run build.py".format(dictionary_path)
 
 
-def pred_suggest(sentence):
-    to_sugguest = sentence.split(' ')[-1]
-
-    print('word suggestion for prefix \'{}\':'.format(sentence))
-    print(trie.start_with_prefix(to_sugguest))
-    print(len(trie.start_with_prefix('')))
-
-    suggest_words = trie.start_with_prefix('')
-
-    return suggest_words
+def get_dictionary_path():
+    global dictionary_path
+    return dictionary_path
 
 
 if __name__ == '__main__':
-    global trie
-    trie = Trie()
 
-    # Load the dictionary from the dataset into params
-    args = parser.parse_args()
-    dictionary_path = os.path.join(args.data_dir, 'dictionary.txt')
-    assert os.path.isfile(dictionary_path), "No words file found at {}, run build.py".format(dictionary_path)
-
-    with open(dictionary_path) as f:
-        for line in f:
-            word, type = line.strip().split('::')
-            trie.add(word, type)
-
-    # if trie.has_word('tamagawa denenchofu'):
-    #     print("'tamagawa denenchofu' in trie: ", trie.get_data('tamagawa denenchofu'))
-    #
-    # print('word suggestion for prefix \'ta\':')
-    # print(trie.start_with_prefix('ta'))
+    trie = Trie(dictionary_path)
 
     sentence = 'shall we go to tamagawa denenchofu setagaya-ku tokyo 158-0085 for lunch ?'
-    annotate_sents = pos_tag(sentence)
+    tagging_results = trie.pos_tag(sentence)
+    print('tagging_results:', tagging_results)
 
-    sugguest_test = sentence[:18]
-    suggest_words = pred_suggest(sugguest_test)
+    sentence = sentence[:18]
+    suggestions = trie.pred_suggest(sentence)
+    print('suggestions:', suggestions)

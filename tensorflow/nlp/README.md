@@ -1,14 +1,13 @@
 # Named Entity Recognition with Tensorflow
 
-*Authors: Guillaume Genthial and Olivier Moindrot*
+*Authors: Zhu, Weicheng*
 
-Take the time to read the [tutorials](https://cs230-stanford.github.io).
 
 Note : all scripts must be run in `tensorflow/nlp`.
 
 ## Requirements
 
-We recommend using python3 and a virtual env. See instructions [here](https://cs230-stanford.github.io/project-starter-code.html).
+We recommend using python3 and a virtual env. 
 
 ```
 virtualenv -p python3 .env
