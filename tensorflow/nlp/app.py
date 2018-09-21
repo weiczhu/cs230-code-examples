@@ -33,7 +33,7 @@ def location_extract(sentence):
 
     pos_tags = trie.pos_tag(sentence)
     pos_tags.sort(key=lambda x: len(x[0]), reverse=True)
-    print('pos_tags', pos_tags)
+    print('pos_tags:', pos_tags)
 
     existing_words = list()
     filtered_pos_tags = list()
@@ -69,7 +69,7 @@ def location_extract(sentence):
             hypothesis_pos_tags.append(pos_tag)
 
     for prediction in predictions[0]:
-        pred_word = prediction[0]
+        pred_word = prediction[0].lower()
         pred_tag = prediction[1]
 
         # Decide if it's a discovered word (not in the dictionary), confidence 0.7
