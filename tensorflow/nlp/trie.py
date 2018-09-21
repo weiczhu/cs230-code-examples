@@ -146,6 +146,7 @@ class Trie:
 
     def pos_tag(self, sentence):
         words = sentence.split(' ')
+        words = [word.lower() for word in words]
 
         results = []
         for i in range(len(words)):

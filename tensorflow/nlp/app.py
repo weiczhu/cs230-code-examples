@@ -8,11 +8,13 @@ from predict import Predictor
 from trie import get_dictionary_path
 from trie import Trie
 
+
 def create_app(debug=False):
     app = Flask(__name__)
     app.debug = debug
 
     return app
+
 
 app = create_app(debug=True)
 
@@ -30,6 +32,27 @@ def location_extract(sentence):
     predictions = predictor.predict(sentences_texts)
 
     pos_tags = trie.pos_tag(sentence)
+    pos_tags.sort(key=lambda x: len(x[0]), reverse=True)
+    print('pos_tags', pos_tags)
+
+    existing_words = list()
+    filtered_pos_tags = list()
+    for pos_tag in pos_tags:
+        word = pos_tag[0]
+        tags = pos_tag[1]
+
+        existed = False
+        for existing_word in existing_words:
+            if word in existing_word:
+                existed = True
+                break
+        if existed:
+            continue
+
+        filtered_pos_tags.append([word, tags])
+        existing_words.append(word)
+
+    pos_tags = filtered_pos_tags
 
     # Hybrid approach for NER
     concept_objects = list()
@@ -52,7 +75,7 @@ def location_extract(sentence):
         # Decide if it's a discovered word (not in the dictionary), confidence 0.7
         is_discover_word = True
         for concept_object in concept_objects:
-            if pred_word == concept_object['value'] and pred_tag == concept_object['class']:
+            if pred_word == concept_object['value']:  # and pred_tag == concept_object['class']:
                 is_discover_word = False
 
         if is_discover_word:
