@@ -107,7 +107,7 @@ def loss_fn(outputs, labels):
     # number. This does not affect training, since we ignore the PADded tokens with the mask.
     labels = labels % outputs.shape[1]
 
-    num_tokens = int(torch.sum(mask).data[0])
+    num_tokens = int(torch.sum(mask).item())
 
     # compute cross entropy loss for all tokens (except PADding tokens), by multiplying with mask.
     return -torch.sum(outputs[range(outputs.shape[0]), labels]*mask)/num_tokens
