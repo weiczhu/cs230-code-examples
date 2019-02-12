@@ -36,6 +36,8 @@ def train(model, optimizer, loss_fn, data_iterator, metrics, params, num_steps):
         num_steps: (int) number of batches to train on, each of size params.batch_size
     """
 
+    data_loader = DataLoader(args.data_dir, params)
+
     # set model to training mode
     model.train()
 
@@ -66,8 +68,11 @@ def train(model, optimizer, loss_fn, data_iterator, metrics, params, num_steps):
             output_batch = output_batch.data.cpu().numpy()
             labels_batch = labels_batch.data.cpu().numpy()
 
-            print("Train batch", train_batch.data.cpu().numpy())
-            print("Output batch", np.argmax(output_batch, axis=-1))
+            output_batch_aslist = train_batch.data.cpu().numpy().tolist()
+            print("Train batch", [data_loader.tokenizer.convert_ids_to_tokens(x) for x in output_batch_aslist])
+            print("Output batch", [data_loader.ids_to_tags(x) for x in np.argmax(output_batch, axis=-1)])
+            print("Label batch", [data_loader.ids_to_tags(x) for x in labels_batch])
+
 
             # compute all metrics on this batch
             summary_batch = {metric:metrics[metric](output_batch, labels_batch)

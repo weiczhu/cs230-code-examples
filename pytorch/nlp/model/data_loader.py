@@ -38,10 +38,12 @@ class DataLoader(object):
 
         # loading tags (we require this to map tags to their indices)
         tags_path = os.path.join(data_dir, 'tags.txt')
-        self.tag_map = {}
+        self.tag_id_map = {}
         with open(tags_path) as f:
             for i, t in enumerate(f.read().splitlines()):
-                self.tag_map[t] = i
+                self.tag_id_map[t] = i
+
+        self.id_tag_map = {v: k for k, v in self.tag_id_map.items()}
 
         # adding dataset parameters to param (e.g. vocab size, )
         params.update(json_path)
@@ -83,7 +85,7 @@ class DataLoader(object):
             for token, tag in zip(sentence_whitesplit, label_whitesplit):
                 token = self.tokenizer.tokenize(token)
                 subtokens.extend(self.tokenizer.convert_tokens_to_ids(token))
-                sublabels.extend([self.tag_map[tag]] + [self.tag_map["X"]] * (len(token) - 1))
+                sublabels.extend(self.tags_to_ids([tag]) + self.tags_to_ids(["X"]) * (len(token) - 1))
 
             sentences[idx] = subtokens
             labels[idx] = sublabels
@@ -97,6 +99,12 @@ class DataLoader(object):
         d['data'] = sentences
         d['labels'] = labels
         d['size'] = len(sentences)
+
+    def tags_to_ids(self, tags):
+        return [self.tag_id_map[tag] for tag in tags]
+
+    def ids_to_tags(self, ids):
+        return [self.id_tag_map[id] if id >= 0 else "MASK" for id in ids]
 
     def load_data(self, types, data_dir):
         """
