@@ -1,0 +1,132 @@
+"""Evaluates the model"""
+
+import argparse
+import logging
+import os
+
+import numpy as np
+import torch
+import utils
+import model.net as net
+from model.data_loader import DataLoader
+
+parser = argparse.ArgumentParser()
+parser.add_argument('--data_dir', default='data/small', help="Directory containing the dataset")
+parser.add_argument('--model_dir', default='experiments/base_model', help="Directory containing params.json")
+parser.add_argument('--restore_file', default='best', help="name of the file in --model_dir \
+                     containing weights to load")
+
+
+def predict(model, loss_fn, data_iterator, metrics, params, num_steps):
+    """Evaluate the model on `num_steps` batches.
+
+    Args:
+        model: (torch.nn.Module) the neural network
+        loss_fn: a function that takes batch_output and batch_labels and computes the loss for the batch
+        data_iterator: (generator) a generator that generates batches of data and labels
+        metrics: (dict) a dictionary of functions that compute a metric using the output and labels of each batch
+        params: (Params) hyperparameters
+        num_steps: (int) number of batches to train on, each of size params.batch_size
+    """
+
+    # set model to evaluation mode
+    model.eval()
+
+    # summary for current eval loop
+    summ = []
+
+    # compute metrics over the dataset
+    for _ in range(num_steps):
+        # fetch the next evaluation batch
+        data_batch, labels_batch = next(data_iterator)
+        
+        # compute model output
+        output_batch = model(data_batch)
+        loss = loss_fn(output_batch, labels_batch)
+
+        # extract data from torch Variable, move to cpu, convert to numpy arrays
+        output_batch = output_batch.data.cpu().numpy()
+        labels_batch = labels_batch.data.cpu().numpy()
+
+        data_batch_aslist = data_batch.data.cpu().numpy().tolist()
+        print("Train batch", [data_loader.tokenizer.convert_ids_to_tokens(x) for x in data_batch_aslist])
+        print("Output batch", [data_loader.ids_to_tags(x) for x in np.argmax(output_batch, axis=-1)])
+        print("Label batch", [data_loader.ids_to_tags(x) for x in labels_batch])
+
+        # compute all metrics on this batch
+        summary_batch = {metric: metrics[metric](output_batch, labels_batch)
+                         for metric in metrics}
+        summary_batch['loss'] = loss.item()
+        summ.append(summary_batch)
+
+    # compute mean of all metrics in summary
+    metrics_mean = {metric:np.mean([x[metric] for x in summ]) for metric in summ[0]} 
+    metrics_string = " ; ".join("{}: {:05.3f}".format(k, v) for k, v in metrics_mean.items())
+    logging.info("- Eval metrics : " + metrics_string)
+    return metrics_mean
+
+
+def predict_from_workspace(workspace_dir):
+    """
+        Evaluate the model on the test set.
+    """
+    global args, data_loader
+
+    data_dir = workspace_dir
+    model_dir = os.path.join(data_dir, "model")
+
+    # Load the parameters
+    args = parser.parse_args()
+    trgt_json_path = os.path.join(model_dir, 'params.json')
+    assert os.path.isfile(trgt_json_path), "No json configuration file found at {}".format(json_path)
+
+    params = utils.Params(trgt_json_path)
+    params.data_dir = data_dir if data_dir else args.data_dir
+    params.model_dir = model_dir if model_dir else args.model_dir
+
+    # use GPU if available
+    params.cuda = torch.cuda.is_available()     # use GPU is available
+
+    # Set the random seed for reproducible experiments
+    torch.manual_seed(230)
+    if params.cuda: torch.cuda.manual_seed(230)
+        
+    # Get the logger
+    utils.set_logger(os.path.join(params.model_dir, 'evaluate.log'))
+
+    # Create the input data pipeline
+    logging.info("Creating the dataset...")
+
+    # load data
+    data_loader = DataLoader(params.data_dir, params)
+    data = data_loader.load_data(['test'], params.data_dir)
+    test_data = data['test']
+
+    # specify the test set size
+    params.test_size = test_data['size']
+    test_data_iterator = data_loader.data_iterator(test_data, params)
+
+    logging.info("- done.")
+
+    # Define the model
+    model = net.Net(params).cuda() if params.cuda else net.Net(params)
+    
+    loss_fn = net.loss_fn
+    metrics = net.metrics
+    
+    logging.info("Starting evaluation")
+
+    # Reload weights from the saved file
+    utils.load_checkpoint(os.path.join(params.model_dir, args.restore_file + '.pth.tar'), model)
+
+    # Evaluate
+    num_steps = (params.test_size + 1) // params.batch_size
+    test_metrics = predict(model, loss_fn, test_data_iterator, metrics, params, num_steps)
+    save_path = os.path.join(params.model_dir, "metrics_test_{}.json".format(args.restore_file))
+    utils.save_dict_to_json(test_metrics, save_path)
+
+
+if __name__ == '__main__':
+    workspace_dir1 = "data/small"
+
+    predict_from_workspace(workspace_dir1)

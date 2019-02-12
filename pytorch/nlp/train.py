@@ -66,8 +66,8 @@ def train(model, optimizer, loss_fn, data_iterator, metrics, params, num_steps):
             output_batch = output_batch.data.cpu().numpy()
             labels_batch = labels_batch.data.cpu().numpy()
 
-            output_batch_aslist = train_batch.data.cpu().numpy().tolist()
-            print("Train batch", [data_loader.tokenizer.convert_ids_to_tokens(x) for x in output_batch_aslist])
+            train_batch_aslist = train_batch.data.cpu().numpy().tolist()
+            print("Train batch", [data_loader.tokenizer.convert_ids_to_tokens(x) for x in train_batch_aslist])
             print("Output batch", [data_loader.ids_to_tags(x) for x in np.argmax(output_batch, axis=-1)])
             print("Label batch", [data_loader.ids_to_tags(x) for x in labels_batch])
 
@@ -147,24 +147,27 @@ def train_and_evaluate(model, train_data, val_data, optimizer, loss_fn, metrics,
         utils.save_dict_to_json(val_metrics, last_json_path)
 
 
-def main(data_dir, model_dir):
+def train_from_workspace(workspace_dir):
     global args, data_loader
+
+    data_dir = workspace_dir
+    model_dir = os.path.join(data_dir, "model")
 
     # Load the parameters from json file
     args = parser.parse_args()
-    json_path = os.path.join(args.model_dir, 'params.json')
-    assert os.path.isfile(json_path), "No json configuration file found at {}".format(json_path)
+    src_json_path = os.path.join(args.model_dir, 'params.json')
+    assert os.path.isfile(src_json_path), "No json configuration file found at {}".format(src_json_path)
 
-    filepath = os.path.join(model_dir, 'params.json')
+    trgt_json_path = os.path.join(model_dir, 'params.json')
     if not os.path.exists(model_dir):
         print("Workspace Model Directory does not exist! Making directory {}".format(model_dir))
         os.mkdir(model_dir)
     else:
         print("Workspace Model Directory exists! ")
 
-    shutil.copyfile(json_path, filepath)
+    shutil.copyfile(src_json_path, trgt_json_path)
 
-    params = utils.Params(json_path)
+    params = utils.Params(trgt_json_path)
     params.data_dir = data_dir if data_dir else args.data_dir
     params.model_dir = model_dir if model_dir else args.model_dir
 
@@ -208,7 +211,6 @@ def main(data_dir, model_dir):
 
 
 if __name__ == '__main__':
-    workspace_data_dir = "data/small"
-    workspace_model_dir = os.path.join(workspace_data_dir, "model")
+    workspace_dir1 = "data/small"
 
-    main(workspace_data_dir, workspace_model_dir)
+    train_from_workspace(workspace_dir1)
