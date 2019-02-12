@@ -12,9 +12,10 @@ parser.add_argument('--min_count_tag', default=1, help="Minimum count for tags i
 parser.add_argument('--data_dir', default='data/small', help="Directory containing the dataset")
 
 # Hyper parameters for the vocab
-PAD_WORD = '<pad>'
+PAD_WORD = '[PAD]'
 PAD_TAG = 'O'
-UNK_WORD = 'UNK'
+UNK_WORD = '[UNK]'
+SUBTOKEN_TAG = "X"
 
 
 def save_vocab_to_txt_file(vocab, txt_path):
@@ -89,6 +90,7 @@ if __name__ == '__main__':
     # Add pad tokens
     if PAD_WORD not in words: words.append(PAD_WORD)
     if PAD_TAG not in tags: tags.append(PAD_TAG)
+    if SUBTOKEN_TAG not in tags: tags.append(SUBTOKEN_TAG)
     
     # add word for unknown words 
     words.append(UNK_WORD)

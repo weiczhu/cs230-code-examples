@@ -1,18 +1,19 @@
-import random
-import numpy as np
 import os
-import sys
+import random
 
+import numpy as np
 import torch
+from pytorch_pretrained_bert.tokenization import (BertTokenizer)
 from torch.autograd import Variable
 
-import utils 
+import utils
 
 
 class DataLoader(object):
     """
     Handles all aspects of the data. Stores the dataset_params, vocabulary and tags with their mappings to indices.
     """
+
     def __init__(self, data_dir, params):
         """
         Loads dataset_params, vocabulary and tags. Ensure you have run `build_vocab.py` on data_dir before using this
@@ -27,19 +28,16 @@ class DataLoader(object):
         # loading dataset_params
         json_path = os.path.join(data_dir, 'dataset_params.json')
         assert os.path.isfile(json_path), "No json file found at {}, run build_vocab.py".format(json_path)
-        self.dataset_params = utils.Params(json_path)        
-        
+        self.dataset_params = utils.Params(json_path)
+
+        self.tokenizer = BertTokenizer.from_pretrained("bert-base-multilingual-cased", do_lower_case=False)
         # loading vocab (we require this to map words to their indices)
-        vocab_path = os.path.join(data_dir, 'words.txt')
-        self.vocab = {}
-        with open(vocab_path) as f:
-            for i, l in enumerate(f.read().splitlines()):
-                self.vocab[l] = i
-        
+        self.vocab = self.tokenizer.vocab
+
         # setting the indices for UNKnown words and PADding symbols
         self.unk_ind = self.vocab[self.dataset_params.unk_word]
         self.pad_ind = self.vocab[self.dataset_params.pad_word]
-                
+
         # loading tags (we require this to map tags to their indices)
         tags_path = os.path.join(data_dir, 'tags.txt')
         self.tag_map = {}
@@ -49,6 +47,8 @@ class DataLoader(object):
 
         # adding dataset parameters to param (e.g. vocab size, )
         params.update(json_path)
+
+        params.vocab_size = len(self.vocab)
 
     def load_sentences_labels(self, sentences_file, labels_file, d):
         """
@@ -65,19 +65,30 @@ class DataLoader(object):
         labels = []
 
         with open(sentences_file) as f:
-            for sentence in f.read().splitlines():
-                # replace each token by its index if it is in vocab
-                # else use index of UNK_WORD
-                s = [self.vocab[token] if token in self.vocab 
-                     else self.unk_ind
-                     for token in sentence.split(' ')]
-                sentences.append(s)
-        
+            for line in f.read().splitlines():
+                line = line.strip()
+                if line:
+                    sentences.append(line)
+
         with open(labels_file) as f:
-            for sentence in f.read().splitlines():
-                # replace each label by its index
-                l = [self.tag_map[label] for label in sentence.split(' ')]
-                labels.append(l)        
+            for line in f.read().splitlines():
+                line = line.strip()
+                if line:
+                    labels.append(line)
+
+        for idx, (sentence, label) in enumerate(zip(sentences, labels)):
+            subtokens = []
+            sublabels = []
+
+            sentence_whitesplit = sentence.split(' ')
+            label_whitesplit = label.split(' ')
+            for token, tag in zip(sentence_whitesplit, label_whitesplit):
+                token = self.tokenizer.tokenize(token)
+                subtokens.extend(self.tokenizer.convert_tokens_to_ids(token))
+                sublabels.extend([self.tag_map[tag]] + [self.tag_map["X"]] * (len(token) - 1))
+
+            sentences[idx] = subtokens
+            labels[idx] = sublabels
 
         # checks to ensure there is a tag for each token
         assert len(labels) == len(sentences)
@@ -102,7 +113,7 @@ class DataLoader(object):
 
         """
         data = {}
-        
+
         for split in ['train', 'val', 'test']:
             if split in types:
                 sentences_file = os.path.join(data_dir, split, "sentences.txt")
@@ -135,18 +146,18 @@ class DataLoader(object):
             random.shuffle(order)
 
         # one pass over data
-        for i in range((data['size']+1)//params.batch_size):
+        for i in range((data['size'] + 1) // params.batch_size):
             # fetch sentences and tags
-            batch_sentences = [data['data'][idx] for idx in order[i*params.batch_size:(i+1)*params.batch_size]]
-            batch_tags = [data['labels'][idx] for idx in order[i*params.batch_size:(i+1)*params.batch_size]]
+            batch_sentences = [data['data'][idx] for idx in order[i * params.batch_size:(i + 1) * params.batch_size]]
+            batch_tags = [data['labels'][idx] for idx in order[i * params.batch_size:(i + 1) * params.batch_size]]
 
             # compute length of longest sentence in batch
             batch_max_len = max([len(s) for s in batch_sentences])
 
             # prepare a numpy array with the data, initialising the data with pad_ind and all labels with -1
             # initialising labels to -1 differentiates tokens with tags from PADding tokens
-            batch_data = self.pad_ind*np.ones((len(batch_sentences), batch_max_len))
-            batch_labels = -1*np.ones((len(batch_sentences), batch_max_len))
+            batch_data = self.pad_ind * np.ones((len(batch_sentences), batch_max_len))
+            batch_labels = -1 * np.ones((len(batch_sentences), batch_max_len))
 
             # copy the data to the numpy array
             for j in range(len(batch_sentences)):
@@ -163,5 +174,5 @@ class DataLoader(object):
 
             # convert them to Variables to record operations in the computational graph
             batch_data, batch_labels = Variable(batch_data), Variable(batch_labels)
-    
+
             yield batch_data, batch_labels
