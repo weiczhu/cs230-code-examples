@@ -104,7 +104,7 @@ class DataLoader(object):
         return [self.tag_id_map[tag] for tag in tags]
 
     def ids_to_tags(self, ids):
-        return [self.id_tag_map[id] if id >= 0 else "MASK" for id in ids]
+        return [self.id_tag_map[id] if id >= 0 else "[MASK]" for id in ids]
 
     def load_data(self, types, data_dir):
         """
