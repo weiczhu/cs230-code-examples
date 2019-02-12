@@ -97,7 +97,7 @@ if __name__ == '__main__':
 
     # Save vocabularies to file
     print("Saving vocabularies to file...")
-    save_vocab_to_txt_file(words, os.path.join(args.data_dir, 'words.txt'))
+    # save_vocab_to_txt_file(words, os.path.join(args.data_dir, 'words.txt'))
     save_vocab_to_txt_file(tags, os.path.join(args.data_dir, 'tags.txt'))
     print("- done.")
 
@@ -106,7 +106,7 @@ if __name__ == '__main__':
         'train_size': size_train_sentences,
         'dev_size': size_dev_sentences,
         'test_size': size_test_sentences,
-        'vocab_size': len(words),
+        # 'vocab_size': len(words),
         'number_of_tags': len(tags),
         'pad_word': PAD_WORD,
         'pad_tag': PAD_TAG,

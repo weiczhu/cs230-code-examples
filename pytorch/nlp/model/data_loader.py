@@ -31,12 +31,10 @@ class DataLoader(object):
         self.dataset_params = utils.Params(json_path)
 
         self.tokenizer = BertTokenizer.from_pretrained("bert-base-multilingual-cased", do_lower_case=False)
-        # loading vocab (we require this to map words to their indices)
-        self.vocab = self.tokenizer.vocab
 
         # setting the indices for UNKnown words and PADding symbols
-        self.unk_ind = self.vocab[self.dataset_params.unk_word]
-        self.pad_ind = self.vocab[self.dataset_params.pad_word]
+        self.unk_ind, self.pad_ind = self.tokenizer.convert_tokens_to_ids(
+            [self.dataset_params.unk_word, self.dataset_params.pad_word])
 
         # loading tags (we require this to map tags to their indices)
         tags_path = os.path.join(data_dir, 'tags.txt')
@@ -48,7 +46,7 @@ class DataLoader(object):
         # adding dataset parameters to param (e.g. vocab size, )
         params.update(json_path)
 
-        params.vocab_size = len(self.vocab)
+        params.vocab_size = len(self.tokenizer.vocab)
 
     def load_sentences_labels(self, sentences_file, labels_file, d):
         """

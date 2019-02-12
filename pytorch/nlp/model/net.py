@@ -70,14 +70,14 @@ class Net(nn.Module):
         s = s.contiguous()
 
         # reshape the Variable so that each row contains one token
-        s = s.view(-1, s.shape[2])       # dim: batch_size*seq_len x lstm_hidden_dim
+        # s = s.view(-1, s.shape[2])       # dim: batch_size*seq_len x lstm_hidden_dim
 
         # apply the fully connected layer and obtain the output (before softmax) for each token
         s = self.fc(s)                   # dim: batch_size*seq_len x num_tags
 
         # apply log softmax on each token's output (this is recommended over applying softmax
         # since it is numerically more stable)
-        return F.log_softmax(s, dim=1)   # dim: batch_size*seq_len x num_tags
+        return F.log_softmax(s, dim=-1)   # dim: batch_size*seq_len x num_tags
 
 
 def loss_fn(outputs, labels):
@@ -96,6 +96,8 @@ def loss_fn(outputs, labels):
     Note: you may use a standard loss function from http://pytorch.org/docs/master/nn.html#loss-functions. This example
           demonstrates how you can easily define a custom loss function.
     """
+
+    outputs = outputs.view(-1, outputs.shape[2])
 
     # reshape labels to give a flat vector of length batch_size*seq_len
     labels = labels.view(-1)
@@ -125,6 +127,8 @@ def accuracy(outputs, labels):
     Returns: (float) accuracy in [0,1]
     """
 
+    outputs = outputs.reshape(-1, outputs.shape[2])
+
     # reshape labels to give a flat vector of length batch_size*seq_len
     labels = labels.ravel()
 
@@ -132,7 +136,7 @@ def accuracy(outputs, labels):
     mask = (labels >= 0)
 
     # np.argmax gives us the class predicted for each token by the model
-    outputs = np.argmax(outputs, axis=1)
+    outputs = np.argmax(outputs, axis=-1)
 
     # compare outputs with labels and divide by number of tokens (excluding PADding tokens)
     return np.sum(outputs==labels)/float(np.sum(mask))

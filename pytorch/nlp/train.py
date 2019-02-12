@@ -66,6 +66,9 @@ def train(model, optimizer, loss_fn, data_iterator, metrics, params, num_steps):
             output_batch = output_batch.data.cpu().numpy()
             labels_batch = labels_batch.data.cpu().numpy()
 
+            print("Train batch", train_batch.data.cpu().numpy())
+            print("Output batch", np.argmax(output_batch, axis=-1))
+
             # compute all metrics on this batch
             summary_batch = {metric:metrics[metric](output_batch, labels_batch)
                              for metric in metrics}
