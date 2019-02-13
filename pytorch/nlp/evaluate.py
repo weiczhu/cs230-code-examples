@@ -61,15 +61,22 @@ def evaluate(model, loss_fn, data_iterator, metrics, params, num_steps):
     return metrics_mean
 
 
-if __name__ == '__main__':
+def evaluate_from_workspace(workspace_dir):
+    global args, data_loader
+
     """
         Evaluate the model on the test set.
     """
+    data_dir = workspace_dir
+    model_dir = os.path.join(data_dir, "model")
+
     # Load the parameters
     args = parser.parse_args()
-    json_path = os.path.join(args.model_dir, 'params.json')
+    json_path = os.path.join(model_dir, 'params.json')
     assert os.path.isfile(json_path), "No json configuration file found at {}".format(json_path)
     params = utils.Params(json_path)
+    params.data_dir = data_dir if data_dir else args.data_dir
+    params.model_dir = model_dir if model_dir else args.model_dir
 
     # use GPU if available
     params.cuda = torch.cuda.is_available()     # use GPU is available
@@ -79,14 +86,14 @@ if __name__ == '__main__':
     if params.cuda: torch.cuda.manual_seed(230)
         
     # Get the logger
-    utils.set_logger(os.path.join(args.model_dir, 'evaluate.log'))
+    utils.set_logger(os.path.join(params.model_dir, 'evaluate.log'))
 
     # Create the input data pipeline
     logging.info("Creating the dataset...")
 
     # load data
-    data_loader = DataLoader(args.data_dir, params)
-    data = data_loader.load_data_from_dir(['test'], args.data_dir)
+    data_loader = DataLoader(params.data_dir, params)
+    data = data_loader.load_data_from_dir(['test'], params.data_dir)
     test_data = data['test']
 
     # specify the test set size
@@ -104,10 +111,16 @@ if __name__ == '__main__':
     logging.info("Starting evaluation")
 
     # Reload weights from the saved file
-    utils.load_checkpoint(os.path.join(args.model_dir, args.restore_file + '.pth.tar'), model)
+    utils.load_checkpoint(os.path.join(params.model_dir, args.restore_file + '.pth.tar'), model)
 
     # Evaluate
     num_steps = (params.test_size + 1) // params.batch_size
     test_metrics = evaluate(model, loss_fn, test_data_iterator, metrics, params, num_steps)
-    save_path = os.path.join(args.model_dir, "metrics_test_{}.json".format(args.restore_file))
+    save_path = os.path.join(params.model_dir, "metrics_test_{}.json".format(args.restore_file))
     utils.save_dict_to_json(test_metrics, save_path)
+
+
+if __name__ == '__main__':
+    workspace_dir1 = "data/small"
+
+    evaluate_from_workspace(workspace_dir1)
