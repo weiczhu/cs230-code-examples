@@ -77,7 +77,7 @@ class Net(nn.Module):
 
         # apply log softmax on each token's output (this is recommended over applying softmax
         # since it is numerically more stable)
-        return F.log_softmax(s, dim=-1)   # dim: batch_size*seq_len x num_tags
+        return F.softmax(s, dim=-1)   # dim: batch_size*seq_len x num_tags
 
 
 def loss_fn(outputs, labels):

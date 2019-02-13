@@ -46,9 +46,10 @@ def predict(model, data):
     data_batch = [data_loader.tokenizer.convert_ids_to_tokens(x) for x in data_batch_aslist]
 
     output_batch = output_batch.data.cpu().numpy()
+    confidence_batch = np.max(output_batch, axis=-1).tolist()
     output_batch = [data_loader.ids_to_tags(x) for x in np.argmax(output_batch, axis=-1)]
 
-    return data_batch, output_batch
+    return data_batch, output_batch, confidence_batch
 
 
 def predict_from_workspace(workspace_dir):
@@ -114,10 +115,11 @@ def predict_from_workspace(workspace_dir):
     utils.load_checkpoint(os.path.join(params.model_dir, args.restore_file + '.pth.tar'), model)
 
     # Evaluate
-    data, output = predict(model, batch_data)
+    data, output, confidence = predict(model, batch_data)
 
     print("Train batch", data)
     print("Output batch", output)
+    print("Output confidence", confidence)
 
 
 if __name__ == '__main__':
