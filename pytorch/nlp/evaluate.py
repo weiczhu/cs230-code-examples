@@ -86,7 +86,7 @@ if __name__ == '__main__':
 
     # load data
     data_loader = DataLoader(args.data_dir, params)
-    data = data_loader.load_data(['test'], args.data_dir)
+    data = data_loader.load_data_from_dir(['test'], args.data_dir)
     test_data = data['test']
 
     # specify the test set size

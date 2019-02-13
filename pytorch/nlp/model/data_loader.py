@@ -100,13 +100,38 @@ class DataLoader(object):
         d['labels'] = labels
         d['size'] = len(sentences)
 
+    def load_sentences(self, sentences, d):
+        """
+        Loads sentences and labels from their corresponding files. Maps tokens and tags to their indices and stores
+        them in the provided dict d.
+
+        Args:
+            sentences_file: (string) file with sentences with tokens space-separated
+            labels_file: (string) file with NER tags for the sentences in labels_file
+            d: (dict) a dictionary in which the loaded data is stored
+        """
+
+        for idx, sentence in enumerate(sentences):
+            subtokens = []
+
+            sentence_whitesplit = sentence.split(' ')
+            for token in sentence_whitesplit:
+                token = self.tokenizer.tokenize(token)
+                subtokens.extend(self.tokenizer.convert_tokens_to_ids(token))
+
+            sentences[idx] = subtokens
+
+        # storing sentences and labels in dict d
+        d['data'] = sentences
+        d['size'] = len(sentences)
+
     def tags_to_ids(self, tags):
         return [self.tag_id_map[tag] for tag in tags]
 
     def ids_to_tags(self, ids):
         return [self.id_tag_map[id] if id >= 0 else "[MASK]" for id in ids]
 
-    def load_data(self, types, data_dir):
+    def load_data_from_dir(self, types, data_dir):
         """
         Loads the data for each type in types from data_dir.
 
@@ -126,6 +151,12 @@ class DataLoader(object):
                 labels_file = os.path.join(data_dir, split, "labels.txt")
                 data[split] = {}
                 self.load_sentences_labels(sentences_file, labels_file, data[split])
+
+        return data
+
+    def load_data_for_predict(self, sentences):
+        data = {"predict": {}}
+        self.load_sentences(sentences, data["predict"])
 
         return data
 

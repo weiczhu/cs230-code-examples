@@ -186,7 +186,7 @@ def train_from_workspace(workspace_dir):
 
     # load data
     data_loader = DataLoader(params.data_dir, params)
-    data = data_loader.load_data(['train', 'val'], params.data_dir)
+    data = data_loader.load_data_from_dir(['train', 'val'], params.data_dir)
     train_data = data['train']
     val_data = data['val']
 
