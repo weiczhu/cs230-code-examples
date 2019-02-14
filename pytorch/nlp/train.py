@@ -146,6 +146,8 @@ def train_and_evaluate(model, train_data, val_data, optimizer, loss_fn, metrics,
         last_json_path = os.path.join(model_dir, "metrics_val_last_weights.json")
         utils.save_dict_to_json(val_metrics, last_json_path)
 
+    return best_val_acc
+
 
 def train_from_workspace(workspace_dir):
     global args, data_loader
@@ -206,11 +208,14 @@ def train_from_workspace(workspace_dir):
 
     # Train the model
     logging.info("Starting training for {} epoch(s)".format(params.num_epochs))
-    train_and_evaluate(model, train_data, val_data, optimizer, loss_fn, metrics, params, params.model_dir,
+    best_eval_acc = train_and_evaluate(model, train_data, val_data, optimizer, loss_fn, metrics, params, params.model_dir,
                        args.restore_file)
+
+    return best_eval_acc
 
 
 if __name__ == '__main__':
     workspace_dir1 = "data/small"
 
-    train_from_workspace(workspace_dir1)
+    best_eval_acc1 = train_from_workspace(workspace_dir1)
+    print("Eval accuracy:", best_eval_acc1)

@@ -52,7 +52,7 @@ def predict(model, data):
     return data_batch, output_batch, confidence_batch
 
 
-def predict_from_workspace(workspace_dir):
+def predict_from_workspace(workspace_dir, input_data):
     """
         Evaluate the model on the test set.
     """
@@ -64,7 +64,7 @@ def predict_from_workspace(workspace_dir):
     # Load the parameters
     args = parser.parse_args()
     trgt_json_path = os.path.join(model_dir, 'params.json')
-    assert os.path.isfile(trgt_json_path), "No json configuration file found at {}".format(json_path)
+    assert os.path.isfile(trgt_json_path), "No json configuration file found at {}".format(trgt_json_path)
 
     params = utils.Params(trgt_json_path)
     params.data_dir = data_dir if data_dir else args.data_dir
@@ -82,10 +82,6 @@ def predict_from_workspace(workspace_dir):
 
     # Create the input data pipeline
     logging.info("Creating the dataset...")
-
-    input_data = [
-        "At the Group of Eight summit in Scotland , Japanese Prime Minister Junichiro Koizumi said he is outraged by the London attacks .",
-        "He noted terrorist acts must not be forgivable ."]
 
     # load data
     data_loader = DataLoader(params.data_dir, params)
@@ -115,14 +111,40 @@ def predict_from_workspace(workspace_dir):
     utils.load_checkpoint(os.path.join(params.model_dir, args.restore_file + '.pth.tar'), model)
 
     # Evaluate
-    data, output, confidence = predict(model, batch_data)
+    results = predict(model, batch_data)
 
-    print("Train batch", data)
-    print("Output batch", output)
-    print("Output confidence", confidence)
+    return results
 
 
 if __name__ == '__main__':
     workspace_dir1 = "data/small"
+    test_data = input_data = ["Sarin gas attacks on the Tokyo subway system in 1995 killed 12 people and injured thousands ."]
 
-    predict_from_workspace(workspace_dir1)
+    data, output, confidence = predict_from_workspace(workspace_dir1, test_data)
+    print("Train batch", data)
+    print("Output batch", output)
+    print("Output confidence", confidence)
+
+    concat_word_piece = []
+
+    for d, o, c in zip(data[0], output[0], confidence[0]):
+        if d.startswith("##") and concat_word_piece:
+            last_d, last_o, last_c = concat_word_piece[-1]
+            last_d += d.replace("##", "")
+        else:
+            concat_word_piece.append((d, o, c))
+
+    concepts = []
+    for i in range(len(concat_word_piece)):
+        d, o, c = concat_word_piece[i]
+        if o.startswith("B-"):
+            concepts.append((d, o.replace("B-", ""), c))
+        elif o.startswith("I-"):
+            if concepts:
+                if concepts[0][-1] != o[2:]:
+                    del concepts[-1]
+                else:
+                    ld, lo, lc = concepts[-1]
+                    concepts[-1] = (ld, lo, (lc + c) / 2.0)
+
+    print("Extract concepts:", concepts)
